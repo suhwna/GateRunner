@@ -1,0 +1,30 @@
+# Gradle / build
+.gradle/
+**/build/
+**/out/
+
+# Local SDK path
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Kotlin / Java
+.kotlin/
+*.log
+
+# Android artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing / keys
+*.jks
+*.keystore
+keystore.properties
+
+# OS files
+.DS_Store
+Thumbs.db
