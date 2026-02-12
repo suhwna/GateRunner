@@ -1,8 +1,11 @@
 package com.suhwan.gaterunner
 
+import android.content.Context
 import android.os.Bundle
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -141,6 +144,8 @@ private data class Monster(
     val id: Int,
     val pos: Offset,
     val radius: Float,
+    val spriteRawIndex: Int,
+    val role: MonsterRole,
     val hp: Int,
     val ranged: Boolean,
     val shotCooldownMs: Long,
@@ -160,6 +165,7 @@ private data class EnemyShot(
 )
 
 private enum class EnemyShotKind { SPEAR, AXE }
+private enum class MonsterRole { RUSHER, SKIRMISHER, BRUISER, THROWER_SPEAR, THROWER_AXE, CASTER, ELITE_MINI }
 
 private data class Bullet(
     val pos: Offset,
@@ -302,6 +308,7 @@ private data class BgAsh(val pos: Offset, val size: Float)
 private data class BgStump(val pos: Offset, val size: Float)
 private data class BgSkull(val pos: Offset, val size: Float)
 private data class BgLavaPillar(val pos: Offset, val size: Float, val height: Float)
+private data class MonsterSpriteAsset(val bitmap: Bitmap, val label: String)
 
 private enum class ScreenState { MENU, SHOP, GAME }
 
@@ -481,6 +488,13 @@ private fun GameScreen() {
         var toneGen by remember { mutableStateOf<ToneGenerator?>(null) }
         val prefs = remember { context.getSharedPreferences("gaterunner_prefs", android.content.Context.MODE_PRIVATE) }
         val typeface = remember { ResourcesCompat.getFont(context, R.font.galmuri9) }
+        val monsterSprites = remember(context) { extractMonsterSprites(context) }
+        val spritePaint = remember {
+            android.graphics.Paint().apply {
+                isFilterBitmap = false
+                isAntiAlias = false
+            }
+        }
         val uiPaint = remember(typeface) {
             android.graphics.Paint().apply {
                 isAntiAlias = true
@@ -539,11 +553,132 @@ private fun GameScreen() {
             )
         }
 
+        fun pickRoleForStage(stage: Int, rng: Random): MonsterRole {
+            val roll = rng.nextFloat()
+            return when (stage) {
+                0 -> when {
+                    roll < 0.70f -> MonsterRole.RUSHER
+                    roll < 0.90f -> MonsterRole.SKIRMISHER
+                    else -> MonsterRole.BRUISER
+                }
+                1 -> when {
+                    roll < 0.25f -> MonsterRole.RUSHER
+                    roll < 0.65f -> MonsterRole.SKIRMISHER
+                    else -> MonsterRole.BRUISER
+                }
+                else -> when {
+                    roll < 0.20f -> MonsterRole.RUSHER
+                    roll < 0.55f -> MonsterRole.SKIRMISHER
+                    else -> MonsterRole.BRUISER
+                }
+            }
+        }
+
+        fun pickRangedRoleForStage(stage: Int, rng: Random): MonsterRole {
+            val roll = rng.nextFloat()
+            return when (stage) {
+                0 -> if (roll < 0.70f) MonsterRole.THROWER_SPEAR else MonsterRole.THROWER_AXE
+                1 -> if (roll < 0.55f) MonsterRole.THROWER_AXE else MonsterRole.CASTER
+                else -> if (roll < 0.40f) MonsterRole.THROWER_SPEAR else MonsterRole.CASTER
+            }
+        }
+
+        fun hpForRole(role: MonsterRole, stage: Int, hpMult: Int): Int {
+            val hp = when (role) {
+                MonsterRole.RUSHER -> 34 + stage * 20
+                MonsterRole.SKIRMISHER -> 30 + stage * 18
+                MonsterRole.BRUISER -> 62 + stage * 32
+                MonsterRole.THROWER_SPEAR -> ((42 + stage * 24) * 0.85f).toInt()
+                MonsterRole.THROWER_AXE -> ((46 + stage * 26) * 0.9f).toInt()
+                MonsterRole.CASTER -> ((40 + stage * 22) * 0.8f).toInt()
+                MonsterRole.ELITE_MINI -> (86 + stage * 42) * 2
+            }
+            return max(1, hp * hpMult)
+        }
+
+        fun shotKindForRole(role: MonsterRole): EnemyShotKind {
+            return when (role) {
+                MonsterRole.THROWER_AXE -> EnemyShotKind.AXE
+                else -> EnemyShotKind.SPEAR
+            }
+        }
+
+        fun isRangedRole(role: MonsterRole): Boolean {
+            return role == MonsterRole.THROWER_SPEAR || role == MonsterRole.THROWER_AXE || role == MonsterRole.CASTER
+        }
+
+        fun pickMonsterRawSpriteIndex(stage: Int, role: MonsterRole, rng: Random): Int {
+            if (monsterSprites.isEmpty()) return -1
+            val byLabel = monsterSprites.mapIndexed { i, a -> i to a.label }.toMap()
+            fun exact(label: String): Int? = byLabel.entries.firstOrNull { it.value == label }?.key
+            fun byLabels(labels: List<String>): List<Int> = labels.mapNotNull { exact(it) }
+            fun pick(candidates: List<Int>): Int {
+                return if (candidates.isNotEmpty()) candidates[rng.nextInt(candidates.size)]
+                else rng.nextInt(monsterSprites.size)
+            }
+
+            // Fixed label pools (1:1 style mapping target).
+            val s1Melee = listOf("A3", "A4", "A5")
+            val s1Spear = listOf("A2")
+            val s1Axe = listOf("B2")
+            val s1Caster = listOf("C2")
+
+            val s2Rusher = listOf("C1", "C2", "C3")
+            val s2Skirm = listOf("C4", "C5", "D2")
+            val s2Bruiser = listOf("D3", "D4", "E1")
+            val s2Spear = listOf("C6", "D1")
+            val s2Axe = listOf("D5", "E2")
+            val s2Caster = listOf("D6", "E3")
+
+            val s3Rusher = listOf("E2", "E3", "E4")
+            val s3Skirm = listOf("E5", "F1", "F2")
+            val s3Bruiser = listOf("F3", "F4", "G1")
+            val s3Spear = listOf("E7", "F5")
+            val s3Axe = listOf("F6", "G2")
+            val s3Caster = listOf("G3", "G4")
+
+            return when (stage) {
+                0 -> when (role) {
+                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s1Spear))
+                    MonsterRole.THROWER_AXE -> pick(byLabels(s1Axe.ifEmpty { s1Spear }))
+                    MonsterRole.CASTER -> pick(byLabels(s1Caster.ifEmpty { s1Spear }))
+                    MonsterRole.RUSHER, MonsterRole.SKIRMISHER, MonsterRole.BRUISER -> pick(byLabels(s1Melee))
+                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("F1", "F2", "F3")))
+                }
+                1 -> when (role) {
+                    MonsterRole.RUSHER -> pick(byLabels(s2Rusher))
+                    MonsterRole.SKIRMISHER -> pick(byLabels(s2Skirm))
+                    MonsterRole.BRUISER -> pick(byLabels(s2Bruiser))
+                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s2Spear))
+                    MonsterRole.THROWER_AXE -> pick(byLabels(s2Axe))
+                    MonsterRole.CASTER -> pick(byLabels(s2Caster))
+                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("H1", "H2", "H3")))
+                }
+                else -> when (role) {
+                    MonsterRole.RUSHER -> pick(byLabels(s3Rusher))
+                    MonsterRole.SKIRMISHER -> pick(byLabels(s3Skirm))
+                    MonsterRole.BRUISER -> pick(byLabels(s3Bruiser))
+                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s3Spear))
+                    MonsterRole.THROWER_AXE -> pick(byLabels(s3Axe))
+                    MonsterRole.CASTER -> pick(byLabels(s3Caster))
+                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("I1", "I2", "I3")))
+                }
+            }
+        }
+
+        fun radiusFromRawSprite(rawIdx: Int, fallback: Float): Float {
+            if (rawIdx < 0 || rawIdx >= monsterSprites.size) return fallback
+            val bm = monsterSprites[rawIdx].bitmap
+            val srcMax = max(bm.width, bm.height).toFloat().coerceAtLeast(1f)
+            val targetMax = (playerRadius * 2.15f).coerceAtLeast(18f)
+            val rr = (srcMax * (targetMax / srcMax) * 0.5f).coerceAtLeast(9f)
+            return rr
+        }
+
         // 일반 구간의 게이트와 몬스터를 생성하는 함수
         fun spawnNormalSegmentContent(rng: Random) {
             val stage = stageIndex % 3
             val hpMult = if (loopCount >= 1) 3 else 1
-            val hpBonus = (stage * 24 * 1.8f).toInt() * hpMult
             val stride = height * 1.2f
             val gateCount = gatesPerStage
             val laneCount = 2
@@ -615,19 +750,30 @@ private fun GameScreen() {
                         }
                         val cx = (laneCenter + jitter).coerceIn(pathLeft + laneWidth * 0.2f, pathRight - laneWidth * 0.2f)
                         val y = gateY - stride * frac - m * (height * 0.06f)
-                        val r = laneWidth * 0.20f
+                        val baseR = laneWidth * 0.20f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
-                        val isRanged = (rangedSpawned < maxRangedPerSegment) && (rng.nextFloat() < rangedChance)
-                        val hpValue = ((32 * 1.8f).toInt() + hpBonus) * hpMult
+                        val forceRanged = rangedSpawned < maxRangedPerSegment && (rng.nextFloat() < rangedChance)
+                        val role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
+                        val isRanged = isRangedRole(role)
+                        val spriteRaw = pickMonsterRawSpriteIndex(stage, role, rng)
+                        val r = radiusFromRawSprite(spriteRaw, baseR)
+                        val hpValue = hpForRole(role, stage, hpMult)
                         monsters.add(
                             Monster(
                                 id = nextMonsterId++,
                                 pos = Offset(cx, y),
                                 radius = r,
-                                hp = if (isRanged) (hpValue * 0.8f).toInt().coerceAtLeast(1) else hpValue,
+                                spriteRawIndex = spriteRaw,
+                                role = role,
+                                hp = hpValue,
                                 ranged = isRanged,
-                                shotCooldownMs = (900L + rng.nextInt(800) - stage * 120L).coerceAtLeast(420L),
-                                rangedShotKind = if (isRanged && rng.nextBoolean()) EnemyShotKind.AXE else EnemyShotKind.SPEAR,
+                                shotCooldownMs = when (role) {
+                                    MonsterRole.CASTER -> (700L + rng.nextInt(480) - stage * 80L).coerceAtLeast(320L)
+                                    MonsterRole.THROWER_AXE -> (900L + rng.nextInt(640) - stage * 100L).coerceAtLeast(380L)
+                                    MonsterRole.THROWER_SPEAR -> (820L + rng.nextInt(580) - stage * 100L).coerceAtLeast(360L)
+                                    else -> (900L + rng.nextInt(800) - stage * 120L).coerceAtLeast(420L)
+                                },
+                                rangedShotKind = shotKindForRole(role),
                                 baseX = cx,
                                 zigzagPhase = rng.nextFloat() * 6.28f,
                                 dashMs = 0L,
@@ -650,10 +796,16 @@ private fun GameScreen() {
                 repeat(take) { idx ->
                     val i = candidates[idx]
                     val m = monsters[i]
+                    val role = pickRangedRoleForStage(stage, rng)
+                    val spriteRaw = pickMonsterRawSpriteIndex(stage, role, rng)
                     monsters[i] = m.copy(
-                        hp = (m.hp * 0.8f).toInt().coerceAtLeast(1),
+                        radius = radiusFromRawSprite(spriteRaw, m.radius),
+                        spriteRawIndex = spriteRaw,
+                        role = role,
+                        hp = hpForRole(role, stage, hpMult),
                         ranged = true,
-                        shotCooldownMs = (820L + rng.nextInt(620) - stage * 100L).coerceAtLeast(380L)
+                        shotCooldownMs = (820L + rng.nextInt(620) - stage * 100L).coerceAtLeast(380L),
+                        rangedShotKind = shotKindForRole(role)
                     )
                 }
             }
@@ -2319,6 +2471,44 @@ private fun GameScreen() {
                     val r = m.radius
                     val monsterBase = if (m.ranged) Color(0xFF3A2450) else theme.monsterBase
                     val monsterCore = if (m.ranged) Color(0xFFB57CFF) else theme.monsterCore
+                    if (monsterSprites.isNotEmpty()) {
+                        val rawIdx = if (m.spriteRawIndex >= 0) m.spriteRawIndex % monsterSprites.size else m.id % monsterSprites.size
+                        val sprite = monsterSprites[rawIdx].bitmap
+                        val rawLabel = monsterSprites[rawIdx].label
+                        val sw = sprite.width.toFloat()
+                        val sh = sprite.height.toFloat()
+                        val targetMax = max(18f, r * 2f)
+                        val scale = targetMax / max(1f, max(sw, sh))
+                        val dw = sw * scale
+                        val dh = sh * scale
+                        val left = kotlin.math.round(ms.x - dw * 0.5f)
+                        val top = kotlin.math.round(ms.y - dh * 0.72f)
+                        drawOval(
+                            color = Color.Black.copy(alpha = 0.26f),
+                            topLeft = Offset(ms.x - r * 0.72f, ms.y + r * 0.5f),
+                            size = androidx.compose.ui.geometry.Size(r * 1.44f, r * 0.4f)
+                        )
+                        drawIntoCanvas { c ->
+                            c.nativeCanvas.drawBitmap(
+                                sprite,
+                                null,
+                                android.graphics.RectF(left, top, left + dw, top + dh),
+                                spritePaint
+                            )
+                        }
+                        if (m.ranged) {
+                            drawCircle(Color(0xFFFF3B30).copy(alpha = 0.7f), r * 0.16f, Offset(ms.x + r * 0.62f, ms.y - r * 0.78f))
+                        }
+                        drawIntoCanvas { c ->
+                            val fill = android.graphics.Paint(uiPaint).apply { color = ui.text.toArgb() }
+                            val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
+                            drawOutlinedText(c.nativeCanvas, stroke, fill, m.hp.toString(), ms.x, ms.y - r * 1.2f, 36f, android.graphics.Paint.Align.CENTER)
+                            val idFill = android.graphics.Paint(uiPaint).apply { color = Color(0xFFFFC35A).toArgb() }
+                            val idStroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
+                            drawOutlinedText(c.nativeCanvas, idStroke, idFill, rawLabel, ms.x, ms.y - r * 1.55f, 30f, android.graphics.Paint.Align.CENTER)
+                        }
+                        return@forEach
+                    }
                     // common shadow
                     drawOval(
                         color = Color.Black.copy(alpha = 0.28f),
@@ -2519,6 +2709,9 @@ private fun GameScreen() {
                     val fill = android.graphics.Paint(uiPaint).apply { color = ui.text.toArgb() }
                     val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
                     drawOutlinedText(c.nativeCanvas, stroke, fill, m.hp.toString(), ms.x, ms.y - r * 1.2f, 36f, android.graphics.Paint.Align.CENTER)
+                    val idFill = android.graphics.Paint(uiPaint).apply { color = Color(0xFFFFC35A).toArgb() }
+                    val idStroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
+                    drawOutlinedText(c.nativeCanvas, idStroke, idFill, "#-", ms.x, ms.y - r * 1.55f, 24f, android.graphics.Paint.Align.CENTER)
                 }
                 }
 
@@ -4100,4 +4293,177 @@ private fun generateBackground(
             }
         }
     }
+}
+
+private fun extractMonsterSprites(context: Context): List<MonsterSpriteAsset> {
+    val sheet = BitmapFactory.decodeResource(context.resources, R.drawable.monsters) ?: return emptyList()
+    val w = sheet.width
+    val h = sheet.height
+    if (w <= 0 || h <= 0) return emptyList()
+
+    val pixels = IntArray(w * h)
+    sheet.getPixels(pixels, 0, w, 0, 0, w, h)
+    val bg = pixels[0]
+    val bgR = (bg shr 16) and 0xFF
+    val bgG = (bg shr 8) and 0xFF
+    val bgB = bg and 0xFF
+
+    fun isSpritePixel(c: Int): Boolean {
+        val a = (c ushr 24) and 0xFF
+        if (a < 24) return false
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        val diff = kotlin.math.abs(r - bgR) + kotlin.math.abs(g - bgG) + kotlin.math.abs(b - bgB)
+        return diff > 20
+    }
+
+    // Prefer fixed-grid extraction (stable index order).
+    // monsters.png is usually a sprite sheet arranged in equal cells.
+    run {
+        val tile = 32
+        if (w % tile == 0 && h % tile == 0) {
+            val cols = w / tile
+            val rows = h / tile
+            val sprites = mutableListOf<MonsterSpriteAsset>()
+            for (ry in 0 until rows) {
+                for (rx in 0 until cols) {
+                    val x0 = rx * tile
+                    val y0 = ry * tile
+                    var minX = tile
+                    var minY = tile
+                    var maxX = -1
+                    var maxY = -1
+                    for (yy in 0 until tile) {
+                        for (xx in 0 until tile) {
+                            val c = pixels[(y0 + yy) * w + (x0 + xx)]
+                            if (!isSpritePixel(c)) continue
+                            if (xx < minX) minX = xx
+                            if (yy < minY) minY = yy
+                            if (xx > maxX) maxX = xx
+                            if (yy > maxY) maxY = yy
+                        }
+                    }
+                    if (maxX >= minX && maxY >= minY) {
+                        val pad = 1
+                        val l = (x0 + minX - pad).coerceAtLeast(0)
+                        val t = (y0 + minY - pad).coerceAtLeast(0)
+                        val r = (x0 + maxX + pad + 1).coerceAtMost(w)
+                        val b2 = (y0 + maxY + pad + 1).coerceAtMost(h)
+                        sprites.add(
+                            MonsterSpriteAsset(
+                                bitmap = Bitmap.createBitmap(sheet, l, t, r - l, b2 - t),
+                                label = "${rowToLetters(ry)}${rx + 1}"
+                            )
+                        )
+                    }
+                }
+            }
+            if (sprites.isNotEmpty()) return sprites
+        }
+    }
+
+    val visited = BooleanArray(w * h)
+    val queue = IntArray(w * h)
+    val boxes = mutableListOf<android.graphics.Rect>()
+
+    for (y in 0 until h) {
+        for (x in 0 until w) {
+            val idx = y * w + x
+            if (visited[idx] || !isSpritePixel(pixels[idx])) continue
+            var qh = 0
+            var qt = 0
+            queue[qt++] = idx
+            visited[idx] = true
+            var minX = x
+            var maxX = x
+            var minY = y
+            var maxY = y
+            var count = 0
+            while (qh < qt) {
+                val cur = queue[qh++]
+                val cx = cur % w
+                val cy = cur / w
+                count += 1
+                if (cx < minX) minX = cx
+                if (cx > maxX) maxX = cx
+                if (cy < minY) minY = cy
+                if (cy > maxY) maxY = cy
+                val neighbors = intArrayOf(cur - 1, cur + 1, cur - w, cur + w)
+                for (n in neighbors) {
+                    if (n < 0 || n >= pixels.size) continue
+                    val nx = n % w
+                    val ny = n / w
+                    if (kotlin.math.abs(nx - cx) + kotlin.math.abs(ny - cy) != 1) continue
+                    if (!visited[n] && isSpritePixel(pixels[n])) {
+                        visited[n] = true
+                        queue[qt++] = n
+                    }
+                }
+            }
+            val bw = maxX - minX + 1
+            val bh = maxY - minY + 1
+            if (count >= 30 && bw >= 8 && bh >= 8) {
+                val pad = 1
+                boxes.add(
+                    android.graphics.Rect(
+                        (minX - pad).coerceAtLeast(0),
+                        (minY - pad).coerceAtLeast(0),
+                        (maxX + pad + 1).coerceAtMost(w),
+                        (maxY + pad + 1).coerceAtMost(h)
+                    )
+                )
+            }
+        }
+    }
+
+    // Reading-order sort with row clustering.
+    // Simple top-left sorting can look wrong when sprite heights differ.
+    val seed = boxes.sortedBy { (it.top + it.bottom) * 0.5f }
+    val rowTol = 14f
+    val rowCenters = mutableListOf<Float>()
+    val rows = mutableListOf<MutableList<android.graphics.Rect>>()
+    for (r in seed) {
+        val cy = (r.top + r.bottom) * 0.5f
+        var bestRow = -1
+        var bestDist = Float.MAX_VALUE
+        for (i in rowCenters.indices) {
+            val d = kotlin.math.abs(cy - rowCenters[i])
+            if (d < bestDist) {
+                bestDist = d
+                bestRow = i
+            }
+        }
+        if (bestRow == -1 || bestDist > rowTol) {
+            rowCenters.add(cy)
+            rows.add(mutableListOf(r))
+        } else {
+            rows[bestRow].add(r)
+            rowCenters[bestRow] = (rowCenters[bestRow] * (rows[bestRow].size - 1) + cy) / rows[bestRow].size
+        }
+    }
+    val orderedRows = rowCenters.indices.sortedBy { rowCenters[it] }
+    val out = mutableListOf<MonsterSpriteAsset>()
+    for ((rowOrder, ri) in orderedRows.withIndex()) {
+        rows[ri].sortBy { it.left }
+        rows[ri].forEachIndexed { col, r ->
+            out.add(
+                MonsterSpriteAsset(
+                    bitmap = Bitmap.createBitmap(sheet, r.left, r.top, r.width(), r.height()),
+                    label = "${rowToLetters(rowOrder)}${col + 1}"
+                )
+            )
+        }
+    }
+    return out
+}
+
+private fun rowToLetters(row: Int): String {
+    var n = row
+    val out = StringBuilder()
+    do {
+        out.append(('A'.code + (n % 26)).toChar())
+        n = (n / 26) - 1
+    } while (n >= 0)
+    return out.reverse().toString()
 }
