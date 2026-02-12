@@ -397,7 +397,7 @@ private fun GameScreen() {
         var targetScrollY by remember { mutableStateOf(0f) }
         var playerX by remember { mutableStateOf(width / 2f) }
         var targetPlayerX by remember { mutableStateOf(width / 2f) }
-        val playerY = height * 0.86f
+        val playerY = height * 0.80f
         val playerRadius = min(width, height) * 0.04025f
         val pathWidth = width * 0.62f
         val pathLeft = (width - pathWidth) / 2f
@@ -1738,7 +1738,6 @@ private fun GameScreen() {
         Box(modifier = Modifier.fillMaxSize()) {
             if (screenState == ScreenState.MENU) {
                 val context = LocalContext.current
-                // Background preview (subtle)
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val theme = stageTheme(0)
                     val dirtTop = theme.dirtTop
@@ -1754,74 +1753,41 @@ private fun GameScreen() {
                     )
                 }
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val frame = ui.frame
-                    val panel = ui.panel
-                    val accent = ui.accent
-                    val glow = ui.glow
-                    val shape = RoundedCornerShape(24.dp)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Title plate
                         Box(
                             modifier = Modifier
                                 .width(360.dp)
-                                .height(150.dp),
+                                .height(178.dp)
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                    ),
+                                    shape = RoundedCornerShape(26.dp)
+                                )
+                                .border(2.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(26.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawRoundRect(
-                                    color = frame,
-                                    topLeft = Offset(0f, 0f),
-                                    size = size,
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(24f, 24f)
-                                )
-                                drawRoundRect(
-                                    brush = Brush.verticalGradient(listOf(panel, Color(0xFF4B2A16))),
-                                    topLeft = Offset(6f, 6f),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 12f, size.height - 12f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f)
-                                )
-                                drawRoundRect(
-                                    brush = Brush.horizontalGradient(listOf(Color(0xFFFFE2A6), accent, Color(0xFFB06B2A))),
-                                    topLeft = Offset(10f, 10f),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 20f, 10f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
-                                )
-                                drawRoundRect(
-                                    brush = Brush.horizontalGradient(listOf(accent, Color(0xFFB06B2A))),
-                                    topLeft = Offset(18f, size.height - 34f),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 36f, 16f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-                                )
-                                drawCircle(glow.copy(alpha = 0.22f), size.minDimension * 0.7f, Offset(size.width * 0.5f, size.height * 0.2f))
-                                // sparkles
-                                val s1 = Offset(size.width * 0.18f, size.height * 0.35f)
-                                val s2 = Offset(size.width * 0.82f, size.height * 0.32f)
-                                drawLine(glow, s1 + Offset(-8f, 0f), s1 + Offset(8f, 0f), 2.5f)
-                                drawLine(glow, s1 + Offset(0f, -8f), s1 + Offset(0f, 8f), 2.5f)
-                                drawLine(glow, s2 + Offset(-6f, 0f), s2 + Offset(6f, 0f), 2.5f)
-                                drawLine(glow, s2 + Offset(0f, -6f), s2 + Offset(0f, 6f), 2.5f)
-                            }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("게이트 러너", color = glow, fontSize = 40.sp)
-                                Text("아케이드 퀘스트", color = accent, fontSize = 16.sp)
+                                Text("GATE RUNNER", color = ui.accent, fontSize = 44.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("ARCADE HUNTER", color = ui.text.copy(alpha = 0.92f), fontSize = 18.sp)
                             }
                         }
-                        Spacer(modifier = Modifier.height(20.dp))
-                        val menuTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
+                        Spacer(modifier = Modifier.height(26.dp))
+                        val menuAction: @Composable (String, Color, () -> Unit) -> Unit = { label, color, onClick ->
                             Text(
                                 label,
-                                color = ui.text,
-                                fontSize = 26.sp,
+                                color = color,
+                                fontSize = 34.sp,
                                 modifier = Modifier
-                                    .padding(vertical = 8.dp)
+                                    .padding(vertical = 6.dp)
                                     .clickable { onClick() }
                             )
                         }
-                        menuTextButton("시작") {
+                        menuAction("시작", ui.accent) {
                             screenState = ScreenState.SHOP
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        menuTextButton("종료") { (context as? android.app.Activity)?.finish() }
+                        menuAction("종료", ui.text.copy(alpha = 0.88f)) { (context as? android.app.Activity)?.finish() }
                     }
                 }
             }
@@ -1846,41 +1812,28 @@ private fun GameScreen() {
                 val accent = ui.accent
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Title plate
                         Box(
                             modifier = Modifier
                                 .width(340.dp)
-                                .height(120.dp),
+                                .height(126.dp)
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                    ),
+                                    shape = RoundedCornerShape(22.dp)
+                                )
+                                .border(2.dp, accent.copy(alpha = 0.75f), RoundedCornerShape(22.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawRoundRect(
-                                    color = frame,
-                                    topLeft = Offset(0f, 0f),
-                                    size = size,
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(22f, 22f)
-                                )
-                                drawRoundRect(
-                                    brush = Brush.verticalGradient(listOf(panel, Color(0xFF4B2A16))),
-                                    topLeft = Offset(6f, 6f),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 12f, size.height - 12f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f)
-                                )
-                                drawRoundRect(
-                                    brush = Brush.horizontalGradient(listOf(accent, Color(0xFFB06B2A))),
-                                    topLeft = Offset(18f, size.height - 30f),
-                                    size = androidx.compose.ui.geometry.Size(size.width - 36f, 12f),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-                                )
-                            }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("상점", color = ui.text, fontSize = 34.sp)
-                                Text("보유 코인  $coins", color = accent, fontSize = 18.sp)
+                                Text("상점", color = ui.accent, fontSize = 36.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("보유 코인  $coins", color = ui.text, fontSize = 18.sp)
                             }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         if (shopMsg.isNotEmpty()) {
-                            Text(shopMsg, color = accent, fontSize = 16.sp)
+                            Text(shopMsg, color = accent, fontSize = 17.sp)
                             Spacer(modifier = Modifier.height(6.dp))
                         }
 
@@ -1893,9 +1846,14 @@ private fun GameScreen() {
                                     modifier = Modifier
                                         .padding(vertical = 6.dp)
                                         .width(340.dp)
-                                        .height(78.dp)
-                                        .background(panel.copy(alpha = 0.9f), shape)
-                                        .border(2.dp, frame, shape)
+                                        .height(80.dp)
+                                        .background(
+                                            brush = Brush.horizontalGradient(
+                                                listOf(panel.copy(alpha = 0.92f), Color(0xAA24170F))
+                                            ),
+                                            shape = shape
+                                        )
+                                        .border(1.5.dp, frame.copy(alpha = 0.75f), shape)
                                         .clickable { if (!isMax) onBuy() },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1923,13 +1881,13 @@ private fun GameScreen() {
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .width(76.dp)
-                                                .height(36.dp)
-                                                .background(ui.panel, RoundedCornerShape(10.dp))
-                                                .border(2.dp, accent, RoundedCornerShape(10.dp)),
+                                                .width(82.dp)
+                                                .height(38.dp)
+                                                .background(Color(0x8024170F), RoundedCornerShape(10.dp))
+                                                .border(1.5.dp, accent, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(if (isMax) "완료" else "구매", color = ui.text, fontSize = 16.sp)
+                                            Text(if (isMax) "완료" else "구매", color = ui.text, fontSize = 15.sp)
                                         }
                                     }
                                 }
@@ -2055,27 +2013,27 @@ private fun GameScreen() {
                                 toneGen?.startTone(ToneGenerator.TONE_PROP_NACK, 120)
                             }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        val menuTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
+                        Spacer(modifier = Modifier.height(14.dp))
+                        val shopAction: @Composable (String, Color, () -> Unit) -> Unit = { label, color, onClick ->
                             Text(
                                 label,
-                                color = ui.text,
-                                fontSize = 24.sp,
+                                color = color,
+                                fontSize = 30.sp,
                                 modifier = Modifier
-                                    .padding(vertical = 6.dp)
+                                    .padding(vertical = 4.dp)
                                     .clickable { onClick() }
                             )
                         }
-                        menuTextButton("게임 시작") {
+                        shopAction("게임 시작", ui.accent) {
                             resetGame()
                             screenState = ScreenState.GAME
                         }
-                        menuTextButton("뒤로") { screenState = ScreenState.MENU }
+                        shopAction("뒤로", ui.text.copy(alpha = 0.9f)) { screenState = ScreenState.MENU }
                     }
                 }
             }
-            val pauseTopDp = 36.dp
-            val pauseBlockPx = with(LocalDensity.current) { 96.dp.toPx() }
+            val pauseTopDp = 72.dp
+            val pauseBlockPx = with(LocalDensity.current) { 72.dp.toPx() }
             val pauseTopPx = with(LocalDensity.current) { pauseTopDp.toPx() }
             val gameInputModifier = if (screenState == ScreenState.GAME && running && !paused && !manualPaused && stageTransitionMs == 0L) {
                 Modifier.pointerInput(pauseBlockPx) {
@@ -2882,60 +2840,42 @@ private fun GameScreen() {
                     w.legendaryShardLaser -> "분기레이저"
                     else -> "특수 없음"
                 }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 84.dp),
-                    contentAlignment = Alignment.TopCenter
-                ) {
-                    Row(
+                val hudChip: @Composable (String, String, Color) -> Unit = { title, value, tint ->
+                    Column(
                         modifier = Modifier
-                            .background(Color(0xCC13100D), RoundedCornerShape(16.dp))
-                            .border(1.5.dp, ui.frame.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            .background(Color(0xA015110D), RoundedCornerShape(12.dp))
+                            .border(1.dp, tint.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("STAGE ${min(stageIndex + 1, 3)}", color = ui.accent, fontSize = 16.sp)
-                        Text(stageThemeName, color = ui.text, fontSize = 16.sp)
+                        Text(title, color = ui.muted, fontSize = 8.sp)
+                        Text(value, color = tint, fontSize = 11.sp)
                     }
                 }
 
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 10.dp, end = 10.dp, bottom = 6.dp),
+                        .padding(top = 96.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Text("STAGE ${min(stageIndex + 1, 3)} · $stageThemeName", color = ui.accent, fontSize = 18.sp)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 8.dp, end = 8.dp, bottom = 24.dp),
                     contentAlignment = Alignment.BottomCenter
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = Color(0xB318120E),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .border(1.dp, ui.frame.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("코인 $coins", color = ui.accent, fontSize = 12.sp)
-                            Text(if (w == null) "무기 없음" else "${w.type.label} Lv${w.level}", color = ui.text, fontSize = 12.sp)
-                            Text(specialLabel, color = Color(0xFFFFB5E8), fontSize = 11.sp)
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (w == null) "공격 -" else "공격 ${w.damage}", color = Color(0xFFFFD084), fontSize = 12.sp)
-                            Text("탄/지 $ammoLabel", color = Color(0xFF9DE7FF), fontSize = 12.sp)
-                            Text("공속 $rateLabel/s", color = Color(0xFF8CFFB0), fontSize = 12.sp)
-                        }
+                        hudChip("공격력", if (w == null) "-" else "${w.damage}", Color(0xFFFFD084))
+                        hudChip("탄환/지속", ammoLabel, Color(0xFF9DE7FF))
+                        hudChip("공격속도", if (w == null) "-" else "$rateLabel 회/초", Color(0xFF8CFFB0))
+                        hudChip("코인", "$coins", ui.accent)
                     }
                 }
             }
@@ -2944,35 +2884,48 @@ private fun GameScreen() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f)),
+                        .background(Color.Black.copy(alpha = 0.55f)),
                     contentAlignment = Alignment.Center
                 ) {
                     androidx.compose.foundation.layout.Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                    Text("강화 선택", color = ui.text, fontSize = 26.sp)
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .border(1.5.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text("강화 선택", color = ui.accent, fontSize = 28.sp)
+                        }
                         upgradeChoices.forEach { choice ->
                             val base = choice.rarity.color
-                            val panel = base.copy(alpha = 0.20f)
+                            val panel = base.copy(alpha = 0.16f)
                             val border = base.copy(alpha = 0.9f)
                             val glow = base.copy(alpha = 0.35f)
-                    val specialBonus = 1
-                    val statBonus = if (choice.rarity == Rarity.LEGENDARY) choice.rarity.bonus * 2 else choice.rarity.bonus
-                    val bonusText = when (choice.upgrade) {
-                        UpgradeType.DMG -> "공격력 +${statBonus}"
-                        UpgradeType.COUNT -> "탄환 +${statBonus}"
-                        UpgradeType.RATE -> "공속 +${statBonus}"
-                        UpgradeType.LASER_TIME -> "지속 +${statBonus}"
-                        UpgradeType.RANGE -> "범위 +${statBonus}"
-                        UpgradeType.PIERCE -> "관통 +${specialBonus}"
-                        UpgradeType.BURST -> "연속 +${specialBonus}"
-                        UpgradeType.LEGENDARY_SPECIAL -> when (weapon?.type) {
-                            WeaponType.MULTI, WeaponType.SPREAD3 -> "명중 시 소형 폭발"
-                            WeaponType.HOMING -> "유도 속도+ / 무한 유도"
-                            WeaponType.LASER -> "랜덤 6갈래 분기 레이저"
-                            null -> "무기 특수 강화"
-                        }
-                    }
+                            val specialBonus = 1
+                            val statBonus = if (choice.rarity == Rarity.LEGENDARY) choice.rarity.bonus * 2 else choice.rarity.bonus
+                            val bonusText = when (choice.upgrade) {
+                                UpgradeType.DMG -> "공격력 +${statBonus}"
+                                UpgradeType.COUNT -> "탄환 +${statBonus}"
+                                UpgradeType.RATE -> "공속 +${statBonus}"
+                                UpgradeType.LASER_TIME -> "지속 +${statBonus}"
+                                UpgradeType.RANGE -> "범위 +${statBonus}"
+                                UpgradeType.PIERCE -> "관통 +${specialBonus}"
+                                UpgradeType.BURST -> "연속 +${specialBonus}"
+                                UpgradeType.LEGENDARY_SPECIAL -> when (weapon?.type) {
+                                    WeaponType.MULTI, WeaponType.SPREAD3 -> "명중 시 소형 폭발"
+                                    WeaponType.HOMING -> "유도 속도+ / 무한 유도"
+                                    WeaponType.LASER -> "랜덤 6갈래 분기 레이저"
+                                    null -> "무기 특수 강화"
+                                }
+                            }
                             val shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
                             Box(
                                 modifier = Modifier
@@ -2980,7 +2933,9 @@ private fun GameScreen() {
                                     .width(340.dp)
                                     .height(110.dp)
                                     .background(
-                                        brush = Brush.horizontalGradient(listOf(panel, panel.copy(alpha = 0.08f))),
+                                        brush = Brush.horizontalGradient(
+                                            listOf(Color(0xCC18120D), panel, Color(0xCC18120D))
+                                        ),
                                         shape = shape
                                     )
                                     .border(2.dp, border, shape)
@@ -3043,8 +2998,8 @@ private fun GameScreen() {
                                         } else {
                                             upgradeLabel(choice.upgrade)
                                         }
-                                        Text(title, color = ui.text, fontSize = 26.sp)
-                                        Text(bonusText, color = glow, fontSize = 16.sp)
+                                        Text(title, color = ui.text, fontSize = 24.sp)
+                                        Text(bonusText, color = glow, fontSize = 15.sp)
                                     }
                                 }
                             }
@@ -3063,7 +3018,19 @@ private fun GameScreen() {
                         .background(Color.Black.copy(alpha = 0.35f * alpha)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(nextName, color = ui.accent.copy(alpha = alpha), fontSize = 36.sp)
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .border(1.5.dp, ui.accent.copy(alpha = 0.75f * alpha), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(nextName, color = ui.accent.copy(alpha = alpha), fontSize = 34.sp)
+                    }
                 }
             }
 
@@ -3073,7 +3040,7 @@ private fun GameScreen() {
                         modifier = Modifier
                             .padding(top = pauseTopDp, end = 16.dp)
                             .align(Alignment.TopEnd)
-                            .size(48.dp)
+                            .size(56.dp)
                             .zIndex(5f)
                             .clickable {
                                 if (stageTransitionMs == 0L && running && upgradeChoices.isEmpty()) {
@@ -3082,7 +3049,7 @@ private fun GameScreen() {
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Canvas(modifier = Modifier.size(30.dp)) {
+                        Canvas(modifier = Modifier.size(34.dp)) {
                             val barW = size.width * 0.28f
                             val barH = size.height * 0.85f
                             val gap = size.width * 0.16f
@@ -3099,26 +3066,38 @@ private fun GameScreen() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f)),
+                        .background(Color.Black.copy(alpha = 0.52f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("일시정지", color = ui.accent, fontSize = 34.sp)
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .border(1.5.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text("일시정지", color = ui.accent, fontSize = 34.sp)
+                        }
+                        Spacer(modifier = Modifier.height(18.dp))
                         Text(
                             "재개",
                             color = ui.text,
-                            fontSize = 24.sp,
+                            fontSize = 30.sp,
                             modifier = Modifier
-                                .padding(vertical = 6.dp)
+                                .padding(vertical = 8.dp)
                                 .clickable { manualPaused = false }
                         )
                         Text(
                             "재시작",
                             color = ui.text,
-                            fontSize = 24.sp,
+                            fontSize = 30.sp,
                             modifier = Modifier
-                                .padding(vertical = 6.dp)
+                                .padding(vertical = 8.dp)
                                 .clickable {
                                     manualPaused = false
                                     resetGame()
@@ -3127,9 +3106,9 @@ private fun GameScreen() {
                         Text(
                             "메인 메뉴",
                             color = ui.text,
-                            fontSize = 24.sp,
+                            fontSize = 30.sp,
                             modifier = Modifier
-                                .padding(vertical = 6.dp)
+                                .padding(vertical = 8.dp)
                                 .clickable {
                                     manualPaused = false
                                     paused = false
@@ -3145,20 +3124,33 @@ private fun GameScreen() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.55f)),
+                        .background(Color.Black.copy(alpha = 0.62f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = 34.sp)
-                        Text("스테이지 ${min(stageIndex + 1, 3)}", color = ui.text, fontSize = 16.sp)
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .border(1.5.dp, accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = 36.sp)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("스테이지 ${min(stageIndex + 1, 3)}", color = ui.text, fontSize = 18.sp)
+                        Spacer(modifier = Modifier.height(18.dp))
                         val actionTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
                             Text(
                                 label,
                                 color = ui.text,
-                                fontSize = 24.sp,
+                                fontSize = 30.sp,
                                 modifier = Modifier
-                                    .padding(vertical = 8.dp)
+                                    .padding(vertical = 9.dp)
                                     .clickable { onClick() }
                             )
                         }
