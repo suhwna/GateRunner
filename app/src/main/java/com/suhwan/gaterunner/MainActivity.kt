@@ -1223,7 +1223,7 @@ private fun GameScreen() {
                                     else -> 9.0f
                                 }
                                 val kind = m.rangedShotKind
-                                val speedShot = if (kind == EnemyShotKind.SPEAR) baseSpeed * 1.22f else baseSpeed * 0.86f
+                                val speedShot = (if (kind == EnemyShotKind.SPEAR) baseSpeed * 1.22f else baseSpeed * 0.86f) * 2f
                                 // Ranged monsters fire straight downward lanes (non-tracking).
                                 val vx = 0f
                                 val vy = speedShot
@@ -2298,34 +2298,171 @@ private fun GameScreen() {
                     val r = m.radius
                     val monsterBase = if (m.ranged) Color(0xFF3A2450) else theme.monsterBase
                     val monsterCore = if (m.ranged) Color(0xFFB57CFF) else theme.monsterCore
-                    // body + head
-                    drawRoundRect(
-                        color = monsterBase,
-                        topLeft = Offset(ms.x - r * 0.55f, ms.y - r * 0.1f),
-                        size = androidx.compose.ui.geometry.Size(r * 1.1f, r * 0.9f),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f)
+                    // common shadow
+                    drawOval(
+                        color = Color.Black.copy(alpha = 0.28f),
+                        topLeft = Offset(ms.x - r * 0.7f, ms.y + r * 0.48f),
+                        size = androidx.compose.ui.geometry.Size(r * 1.4f, r * 0.42f)
                     )
-                    drawCircle(monsterCore, r * 0.65f, Offset(ms.x, ms.y - r * 0.55f))
-                    // helmet rim
-                    drawArc(
-                        color = monsterBase,
-                        startAngle = 200f,
-                        sweepAngle = 140f,
-                        useCenter = false,
-                        topLeft = Offset(ms.x - r * 0.7f, ms.y - r * 1.05f),
-                        size = androidx.compose.ui.geometry.Size(r * 1.4f, r * 1.0f),
-                        style = Stroke(width = 4f)
-                    )
-                    // eyes
-                    drawCircle(Color(0xFF1A120C), r * 0.12f, Offset(ms.x - r * 0.18f, ms.y - r * 0.55f))
-                    drawCircle(Color(0xFF1A120C), r * 0.12f, Offset(ms.x + r * 0.18f, ms.y - r * 0.55f))
-                    drawCircle(Color(0xFFFFE2A6), r * 0.05f, Offset(ms.x - r * 0.22f, ms.y - r * 0.6f))
-                    drawCircle(Color(0xFFFFE2A6), r * 0.05f, Offset(ms.x + r * 0.14f, ms.y - r * 0.6f))
+                    when (theme.name) {
+                        "SWAMP" -> {
+                            // toad-like silhouette
+                            drawOval(
+                                color = monsterBase,
+                                topLeft = Offset(ms.x - r * 0.72f, ms.y - r * 0.02f),
+                                size = androidx.compose.ui.geometry.Size(r * 1.44f, r * 0.9f)
+                            )
+                            drawCircle(monsterCore, r * 0.62f, Offset(ms.x, ms.y - r * 0.48f))
+                            drawCircle(monsterCore.copy(alpha = 0.9f), r * 0.2f, Offset(ms.x - r * 0.34f, ms.y - r * 0.86f))
+                            drawCircle(monsterCore.copy(alpha = 0.9f), r * 0.2f, Offset(ms.x + r * 0.34f, ms.y - r * 0.86f))
+                            drawCircle(Color(0xFF1A120C), r * 0.1f, Offset(ms.x - r * 0.18f, ms.y - r * 0.52f))
+                            drawCircle(Color(0xFF1A120C), r * 0.1f, Offset(ms.x + r * 0.18f, ms.y - r * 0.52f))
+                            drawCircle(Color(0xFFFFE2A6), r * 0.04f, Offset(ms.x - r * 0.2f, ms.y - r * 0.56f))
+                            drawCircle(Color(0xFFFFE2A6), r * 0.04f, Offset(ms.x + r * 0.15f, ms.y - r * 0.56f))
+                        }
+                        "VOLCANO" -> {
+                            // armored silhouette
+                            drawRoundRect(
+                                color = monsterBase,
+                                topLeft = Offset(ms.x - r * 0.56f, ms.y - r * 0.12f),
+                                size = androidx.compose.ui.geometry.Size(r * 1.12f, r * 0.92f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+                            )
+                            drawRoundRect(
+                                color = monsterBase.copy(alpha = 0.95f),
+                                topLeft = Offset(ms.x - r * 0.86f, ms.y - r * 0.04f),
+                                size = androidx.compose.ui.geometry.Size(r * 0.26f, r * 0.56f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(7f, 7f)
+                            )
+                            drawRoundRect(
+                                color = monsterBase.copy(alpha = 0.95f),
+                                topLeft = Offset(ms.x + r * 0.60f, ms.y - r * 0.04f),
+                                size = androidx.compose.ui.geometry.Size(r * 0.26f, r * 0.56f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(7f, 7f)
+                            )
+                            drawCircle(monsterCore, r * 0.62f, Offset(ms.x, ms.y - r * 0.56f))
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo(ms.x - r * 0.42f, ms.y - r * 0.92f)
+                                    lineTo(ms.x - r * 0.24f, ms.y - r * 1.18f)
+                                    lineTo(ms.x - r * 0.06f, ms.y - r * 0.94f)
+                                    close()
+                                },
+                                color = monsterBase
+                            )
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo(ms.x + r * 0.42f, ms.y - r * 0.92f)
+                                    lineTo(ms.x + r * 0.24f, ms.y - r * 1.18f)
+                                    lineTo(ms.x + r * 0.06f, ms.y - r * 0.94f)
+                                    close()
+                                },
+                                color = monsterBase
+                            )
+                            drawCircle(Color(0xFF1A120C), r * 0.11f, Offset(ms.x - r * 0.2f, ms.y - r * 0.58f))
+                            drawCircle(Color(0xFF1A120C), r * 0.11f, Offset(ms.x + r * 0.2f, ms.y - r * 0.58f))
+                            drawLine(theme.glow.copy(alpha = 0.9f), Offset(ms.x - r * 0.26f, ms.y - r * 0.34f), Offset(ms.x + r * 0.26f, ms.y - r * 0.34f), 2.4f)
+                        }
+                        else -> {
+                            // forest goblin silhouette
+                            drawRoundRect(
+                                color = monsterBase,
+                                topLeft = Offset(ms.x - r * 0.55f, ms.y - r * 0.1f),
+                                size = androidx.compose.ui.geometry.Size(r * 1.1f, r * 0.9f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f)
+                            )
+                            drawRoundRect(
+                                color = monsterBase.copy(alpha = 0.96f),
+                                topLeft = Offset(ms.x - r * 0.82f, ms.y - r * 0.02f),
+                                size = androidx.compose.ui.geometry.Size(r * 0.24f, r * 0.55f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+                            )
+                            drawRoundRect(
+                                color = monsterBase.copy(alpha = 0.96f),
+                                topLeft = Offset(ms.x + r * 0.58f, ms.y - r * 0.02f),
+                                size = androidx.compose.ui.geometry.Size(r * 0.24f, r * 0.55f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+                            )
+                            drawCircle(monsterCore, r * 0.65f, Offset(ms.x, ms.y - r * 0.55f))
+                            drawCircle(monsterBase, r * 0.18f, Offset(ms.x - r * 0.52f, ms.y - r * 0.88f))
+                            drawCircle(monsterBase, r * 0.18f, Offset(ms.x + r * 0.52f, ms.y - r * 0.88f))
+                            drawArc(
+                                color = monsterBase,
+                                startAngle = 200f,
+                                sweepAngle = 140f,
+                                useCenter = false,
+                                topLeft = Offset(ms.x - r * 0.7f, ms.y - r * 1.05f),
+                                size = androidx.compose.ui.geometry.Size(r * 1.4f, r * 1.0f),
+                                style = Stroke(width = 4f)
+                            )
+                            drawCircle(Color(0xFF1A120C), r * 0.12f, Offset(ms.x - r * 0.18f, ms.y - r * 0.55f))
+                            drawCircle(Color(0xFF1A120C), r * 0.12f, Offset(ms.x + r * 0.18f, ms.y - r * 0.55f))
+                            drawCircle(Color(0xFFFFE2A6), r * 0.05f, Offset(ms.x - r * 0.22f, ms.y - r * 0.6f))
+                            drawCircle(Color(0xFFFFE2A6), r * 0.05f, Offset(ms.x + r * 0.14f, ms.y - r * 0.6f))
+                            drawRoundRect(
+                                color = Color(0xFF1A120C).copy(alpha = 0.7f),
+                                topLeft = Offset(ms.x - r * 0.18f, ms.y - r * 0.34f),
+                                size = androidx.compose.ui.geometry.Size(r * 0.36f, r * 0.12f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+                            )
+                        }
+                    }
                     // weapon
                     if (m.ranged) {
-                        drawLine(Color(0xFF8C5BD1), Offset(ms.x - r * 0.2f, ms.y + r * 0.55f), Offset(ms.x + r * 0.55f, ms.y - r * 0.45f), 4f)
-                        drawCircle(Color(0xFFFF3D3D), r * 0.16f, Offset(ms.x + r * 0.62f, ms.y - r * 0.52f))
-                        drawCircle(Color(0xFFFFC35A), r * 0.08f, Offset(ms.x + r * 0.62f, ms.y - r * 0.52f))
+                        when (m.rangedShotKind) {
+                            EnemyShotKind.SPEAR -> {
+                                val grip = Offset(ms.x - r * 0.18f, ms.y + r * 0.38f)
+                                val tip = Offset(ms.x + r * 0.78f, ms.y - r * 0.52f)
+                                val neck = Offset(ms.x + r * 0.42f, ms.y - r * 0.18f)
+                                drawLine(Color(0xFF7B4C24), grip, tip, max(2.5f, r * 0.24f))
+                                drawPath(
+                                    path = Path().apply {
+                                        moveTo(tip.x, tip.y)
+                                        lineTo((neck.x + r * 0.2f), (neck.y + r * 0.1f))
+                                        lineTo((neck.x - r * 0.08f), (neck.y - r * 0.22f))
+                                        close()
+                                    },
+                                    color = Color(0xFFD7D7D7)
+                                )
+                                drawPath(
+                                    path = Path().apply {
+                                        moveTo(tip.x, tip.y)
+                                        lineTo((neck.x + r * 0.2f), (neck.y + r * 0.1f))
+                                        lineTo((neck.x - r * 0.08f), (neck.y - r * 0.22f))
+                                        close()
+                                    },
+                                    color = Color(0xFFFF3B30).copy(alpha = 0.85f),
+                                    style = Stroke(width = max(1.2f, r * 0.1f))
+                                )
+                            }
+                            EnemyShotKind.AXE -> {
+                                val handleA = Offset(ms.x - r * 0.2f, ms.y + r * 0.5f)
+                                val handleB = Offset(ms.x + r * 0.45f, ms.y - r * 0.36f)
+                                val head = Offset(ms.x + r * 0.56f, ms.y - r * 0.45f)
+                                drawLine(Color(0xFF7B4C24), handleA, handleB, max(2.8f, r * 0.28f))
+                                drawPath(
+                                    path = Path().apply {
+                                        moveTo((head.x + r * 0.35f), (head.y - r * 0.02f))
+                                        lineTo((head.x - r * 0.04f), (head.y - r * 0.3f))
+                                        lineTo((head.x - r * 0.24f), (head.y + r * 0.08f))
+                                        lineTo((head.x + r * 0.02f), (head.y + r * 0.34f))
+                                        close()
+                                    },
+                                    color = Color(0xFFC8C8C8)
+                                )
+                                drawPath(
+                                    path = Path().apply {
+                                        moveTo((head.x + r * 0.35f), (head.y - r * 0.02f))
+                                        lineTo((head.x - r * 0.04f), (head.y - r * 0.3f))
+                                        lineTo((head.x - r * 0.24f), (head.y + r * 0.08f))
+                                        lineTo((head.x + r * 0.02f), (head.y + r * 0.34f))
+                                        close()
+                                    },
+                                    color = Color(0xFFFF3B30).copy(alpha = 0.85f),
+                                    style = Stroke(width = max(1.2f, r * 0.1f))
+                                )
+                            }
+                        }
                     } else {
                         drawLine(monsterBase, Offset(ms.x - r * 0.65f, ms.y + r * 0.15f), Offset(ms.x + r * 0.65f, ms.y - r * 0.15f), 3.5f)
                         drawCircle(monsterCore, r * 0.1f, Offset(ms.x + r * 0.7f, ms.y - r * 0.18f))
@@ -2419,6 +2556,7 @@ private fun GameScreen() {
                 bossShots.forEach { s ->
                     val base = if (s.type == BossShotType.BOMB) Color(0xFFFF3D3D) else ui.accent
                     val inner = ui.text
+                    drawCircle(Color.Black.copy(alpha = 0.28f), s.radius * 1.08f, s.pos + Offset(3f, 4f))
                     drawCircle(base.copy(alpha = 0.85f), s.radius, s.pos)
                     drawCircle(inner, s.radius * 0.5f, s.pos)
                 }
@@ -2427,12 +2565,26 @@ private fun GameScreen() {
                     val dir = Offset(s.vel.x / len, s.vel.y / len)
                     val perp = Offset(-dir.y, dir.x)
                     val r = s.radius
+                    val warn = Color(0xFFFF3B30)
+                    val sh = Offset(2.5f, 3.5f)
+                    drawCircle(
+                        color = Color.Black.copy(alpha = 0.30f),
+                        radius = r * 1.25f,
+                        center = s.pos + sh
+                    )
+                    drawCircle(
+                        color = warn.copy(alpha = 0.34f),
+                        radius = r * 1.45f,
+                        center = s.pos,
+                        style = Stroke(width = max(2.5f, r * 0.24f))
+                    )
                     when (s.kind) {
                         EnemyShotKind.SPEAR -> {
                             val tip = s.pos + dir * (r * 1.7f)
                             val neck = s.pos - dir * (r * 0.55f)
                             val tail = s.pos - dir * (r * 1.8f)
                             drawLine(Color(0xFF6B4B2A), tail, neck, max(2f, r * 0.45f))
+                            drawLine(warn, tail, neck, max(1.5f, r * 0.18f))
                             drawPath(
                                 path = Path().apply {
                                     moveTo(tip.x, tip.y)
@@ -2442,12 +2594,23 @@ private fun GameScreen() {
                                 },
                                 color = Color(0xFFC8C8C8)
                             )
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo(tip.x, tip.y)
+                                    lineTo((neck + perp * (r * 0.85f)).x, (neck + perp * (r * 0.85f)).y)
+                                    lineTo((neck - perp * (r * 0.85f)).x, (neck - perp * (r * 0.85f)).y)
+                                    close()
+                                },
+                                color = warn.copy(alpha = 0.9f),
+                                style = Stroke(width = max(1.5f, r * 0.14f))
+                            )
                         }
                         EnemyShotKind.AXE -> {
                             val head = s.pos + dir * (r * 0.5f)
                             val handleA = s.pos - dir * (r * 1.5f)
                             val handleB = s.pos + dir * (r * 1.2f)
                             drawLine(Color(0xFF6B4B2A), handleA, handleB, max(2f, r * 0.4f))
+                            drawLine(warn, handleA, handleB, max(1.5f, r * 0.16f))
                             drawPath(
                                 path = Path().apply {
                                     moveTo((head + perp * (r * 1.1f)).x, (head + perp * (r * 1.1f)).y)
@@ -2457,6 +2620,17 @@ private fun GameScreen() {
                                     close()
                                 },
                                 color = Color(0xFFBDBDBD)
+                            )
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo((head + perp * (r * 1.1f)).x, (head + perp * (r * 1.1f)).y)
+                                    lineTo((head + dir * (r * 0.7f)).x, (head + dir * (r * 0.7f)).y)
+                                    lineTo((head - perp * (r * 1.1f)).x, (head - perp * (r * 1.1f)).y)
+                                    lineTo((head - dir * (r * 0.25f)).x, (head - dir * (r * 0.25f)).y)
+                                    close()
+                                },
+                                color = warn.copy(alpha = 0.9f),
+                                style = Stroke(width = max(1.5f, r * 0.14f))
                             )
                         }
                     }
@@ -2546,8 +2720,23 @@ private fun GameScreen() {
                     val head = b.pos + dir * (r * 2.0f)
                     val neck = b.pos - dir * (r * 0.6f)
                     val tail = b.pos - dir * (r * 1.9f)
+                    val sh = Offset(2f, 3f)
+                    val headS = head + sh
+                    val neckS = neck + sh
+                    val tailS = tail + sh
                     // glow
                     drawCircle(glow.copy(alpha = 0.25f), r * 1.6f, b.pos)
+                    // shadow
+                    drawLine(Color.Black.copy(alpha = 0.30f), tailS, neckS, max(2f, r * 0.65f))
+                    drawPath(
+                        path = Path().apply {
+                            moveTo(headS.x, headS.y)
+                            lineTo((neckS + perp * (r * 1.0f)).x, (neckS + perp * (r * 1.0f)).y)
+                            lineTo((neckS - perp * (r * 1.0f)).x, (neckS - perp * (r * 1.0f)).y)
+                            close()
+                        },
+                        color = Color.Black.copy(alpha = 0.28f)
+                    )
                     // shaft
                     drawLine(shaft, tail, neck, max(2f, r * 0.6f))
                     // arrowhead
