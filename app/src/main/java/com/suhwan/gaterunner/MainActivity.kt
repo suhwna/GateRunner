@@ -432,8 +432,9 @@ private fun GameScreen() {
         val pendingBursts = remember { mutableStateListOf<PendingBurst>() }
         val laserAccumDamageByMonster = remember { mutableMapOf<Int, Int>() }
         val laserAccumPosByMonster = remember { mutableMapOf<Int, Offset>() }
+        val laserAccumLastHitByMonster = remember { mutableMapOf<Int, Long>() }
         var laserAccumBossDamage by remember { mutableStateOf(0) }
-        var laserAccumTimerMs by remember { mutableStateOf(0L) }
+        var laserAccumBossLastHitMs by remember { mutableStateOf(0L) }
         var paused by remember { mutableStateOf(false) }
         var upgradeChoices by remember { mutableStateOf<List<UpgradeChoice>>(emptyList()) }
         var manualPaused by remember { mutableStateOf(false) }
@@ -706,8 +707,9 @@ private fun GameScreen() {
             pendingBursts.clear()
             laserAccumDamageByMonster.clear()
             laserAccumPosByMonster.clear()
+            laserAccumLastHitByMonster.clear()
             laserAccumBossDamage = 0
-            laserAccumTimerMs = 0L
+            laserAccumBossLastHitMs = 0L
             shakeMs = 0L
             flashMs = 0L
             bossShotTimerMs = 0L
@@ -778,8 +780,9 @@ private fun GameScreen() {
             pendingBursts.clear()
             laserAccumDamageByMonster.clear()
             laserAccumPosByMonster.clear()
+            laserAccumLastHitByMonster.clear()
             laserAccumBossDamage = 0
-            laserAccumTimerMs = 0L
+            laserAccumBossLastHitMs = 0L
             floatingTexts.clear()
             gateBursts.clear()
             splashBursts.clear()
@@ -1383,7 +1386,8 @@ private fun GameScreen() {
                             val m = monsters[mi]
                             val ms = m.pos.shiftByScroll(scrollY)
                                 if (circleHit(b.pos, b.radius, ms, m.radius)) {
-                                    val newHp = m.hp - b.damage
+                                    val appliedDamage = min(m.hp, b.damage)
+                                    val newHp = m.hp - appliedDamage
                                     if (newHp <= 0) removedMonsters.add(mi) else monsters[mi] = m.copy(hp = newHp)
                                     if (b.splashRadius > 0f) {
                                         splashBursts.add(SplashBurst(ms, b.splashRadius, 220L))
@@ -1393,12 +1397,14 @@ private fun GameScreen() {
                                             val sm = monsters[si]
                                             val ss = sm.pos.shiftByScroll(scrollY)
                                             if (hypot(ss.x - ms.x, ss.y - ms.y) <= (b.splashRadius + sm.radius)) {
-                                                val hp2 = sm.hp - splashDamage
+                                                val splashApplied = min(sm.hp, splashDamage)
+                                                val hp2 = sm.hp - splashApplied
                                                 if (hp2 <= 0) removedMonsters.add(si) else monsters[si] = sm.copy(hp = hp2)
                                                 hitSparks.add(HitSpark(ss, 120L))
-                                                floatingTexts.add(FloatingText("-$splashDamage", ss.copy(y = ss.y - 10f), Color(0xFFFFB36B), 360L))
-                                                laserAccumDamageByMonster[sm.id] = (laserAccumDamageByMonster[sm.id] ?: 0) + splashDamage
+                                                floatingTexts.add(FloatingText("-$splashApplied", ss.copy(y = ss.y - 10f), Color(0xFFFFB36B), 360L))
+                                                laserAccumDamageByMonster[sm.id] = (laserAccumDamageByMonster[sm.id] ?: 0) + splashApplied
                                                 laserAccumPosByMonster[sm.id] = ss
+                                                laserAccumLastHitByMonster[sm.id] = gameTimeMs
                                             }
                                         }
                                     }
@@ -1408,9 +1414,10 @@ private fun GameScreen() {
                                         removedBullets.add(bi)
                                     }
                                     hitSparks.add(HitSpark(ms, 140L))
-                                    floatingTexts.add(FloatingText("-${b.damage}", ms.copy(y = ms.y - 16f), Color(0xFFFFD98A), 360L))
-                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + b.damage
+                                    floatingTexts.add(FloatingText("-$appliedDamage", ms.copy(y = ms.y - 16f), Color(0xFFFFD98A), 360L))
+                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + appliedDamage
                                     laserAccumPosByMonster[m.id] = ms
+                                    laserAccumLastHitByMonster[m.id] = gameTimeMs
                                     addParticles(ms, Color(0xFFFFC35A))
                                     shakeMs = 120L
                                     break
@@ -1455,11 +1462,13 @@ private fun GameScreen() {
                             }
                             if (hitIndex != null && laserTickThisFrame) {
                                 val m = monsters[hitIndex!!]
-                                monsters[hitIndex!!] = m.copy(hp = m.hp - laserDmg)
+                                val appliedDamage = min(m.hp, laserDmg)
+                                monsters[hitIndex!!] = m.copy(hp = m.hp - appliedDamage)
                                 hitSparks.add(HitSpark(m.pos.shiftByScroll(scrollY), 140L))
-                                floatingTexts.add(FloatingText("-$laserDmg", m.pos.shiftByScroll(scrollY).copy(y = m.pos.shiftByScroll(scrollY).y - 18f), Color(0xFFFFD98A), 340L))
-                                laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + laserDmg
+                                floatingTexts.add(FloatingText("-$appliedDamage", m.pos.shiftByScroll(scrollY).copy(y = m.pos.shiftByScroll(scrollY).y - 18f), Color(0xFFFFD98A), 340L))
+                                laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + appliedDamage
                                 laserAccumPosByMonster[m.id] = m.pos.shiftByScroll(scrollY)
+                                laserAccumLastHitByMonster[m.id] = gameTimeMs
                                 if (monsters[hitIndex!!].hp <= 0) {
                                     val dead = monsters[hitIndex!!]
                                     val roll = rng.nextFloat()
@@ -1480,8 +1489,10 @@ private fun GameScreen() {
                                 boss?.let { b ->
                                     val bs = b.rect.shiftByScroll(scrollY)
                                     if (bs.bottom <= playerY && bs.top >= laserTop && laserX >= bs.left - laserHalf && laserX <= bs.right + laserHalf) {
-                                        boss = b.copy(hp = b.hp - laserDmg)
-                                        laserAccumBossDamage += laserDmg
+                                        val appliedDamage = min(b.hp, laserDmg)
+                                        boss = b.copy(hp = b.hp - appliedDamage)
+                                        laserAccumBossDamage += appliedDamage
+                                        laserAccumBossLastHitMs = gameTimeMs
                                     }
                                 }
                             }
@@ -1536,15 +1547,19 @@ private fun GameScreen() {
 
                                 if (hitMonsterIndex != null) {
                                     val m = monsters[hitMonsterIndex!!]
-                                    monsters[hitMonsterIndex!!] = m.copy(hp = m.hp - r.damagePerTick)
-                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + r.damagePerTick
+                                    val appliedDamage = min(m.hp, r.damagePerTick)
+                                    monsters[hitMonsterIndex!!] = m.copy(hp = m.hp - appliedDamage)
+                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + appliedDamage
                                     laserAccumPosByMonster[m.id] = m.pos.shiftByScroll(scrollY)
+                                    laserAccumLastHitByMonster[m.id] = gameTimeMs
                                     hitSparks.add(HitSpark(hitPos, 100L))
                                 } else if (hitBoss) {
                                     boss?.let { b ->
-                                        boss = b.copy(hp = b.hp - r.damagePerTick)
-                                        floatingTexts.add(FloatingText("-${r.damagePerTick}", hitPos.copy(y = hitPos.y - 16f), Color(0xFFFFD98A), 340L))
-                                        laserAccumBossDamage += r.damagePerTick
+                                        val appliedDamage = min(b.hp, r.damagePerTick)
+                                        boss = b.copy(hp = b.hp - appliedDamage)
+                                        floatingTexts.add(FloatingText("-$appliedDamage", hitPos.copy(y = hitPos.y - 16f), Color(0xFFFFD98A), 340L))
+                                        laserAccumBossDamage += appliedDamage
+                                        laserAccumBossLastHitMs = gameTimeMs
                                         hitSparks.add(HitSpark(hitPos, 100L))
                                     }
                                 }
@@ -1563,32 +1578,35 @@ private fun GameScreen() {
                         }
                     }
 
-                    // Aggregate continuous-hit damage numbers for readability.
-                    laserAccumTimerMs += dt
-                    if (laserAccumTimerMs >= 180L) {
-                        laserAccumDamageByMonster.forEach { (id, dmg) ->
-                            if (dmg > 0) {
-                                val pos = laserAccumPosByMonster[id]
-                                    ?: monsters.firstOrNull { it.id == id }?.pos?.shiftByScroll(scrollY)
-                                if (pos != null) {
-                                    floatingTexts.add(
-                                        FloatingText("합계 -$dmg", pos.copy(y = pos.y - 20f), Color(0xFFFF7A3D), 700L)
-                                    )
-                                }
-                            }
-                        }
-                        if (laserAccumBossDamage > 0) {
-                            boss?.let { b ->
-                                val bs = b.rect.shiftByScroll(scrollY)
+                    // Aggregate damage per target independently; flush only after that target stops taking hits.
+                    val accumFlushMs = 220L
+                    val monsterAccumToFlush = laserAccumLastHitByMonster
+                        .filterValues { last -> gameTimeMs - last >= accumFlushMs }
+                        .keys
+                        .toList()
+                    monsterAccumToFlush.forEach { id ->
+                        val dmg = laserAccumDamageByMonster[id] ?: 0
+                        if (dmg > 0) {
+                            val pos = laserAccumPosByMonster[id]
+                            if (pos != null) {
                                 floatingTexts.add(
-                                    FloatingText("합계 -$laserAccumBossDamage", bs.center.copy(y = bs.center.y - 28f), Color(0xFFFF7A3D), 700L)
+                                    FloatingText("-$dmg", pos.copy(y = pos.y - 20f), Color(0xFFFF7A3D), 700L)
                                 )
                             }
                         }
-                        laserAccumDamageByMonster.clear()
-                        laserAccumPosByMonster.clear()
+                        laserAccumDamageByMonster.remove(id)
+                        laserAccumPosByMonster.remove(id)
+                        laserAccumLastHitByMonster.remove(id)
+                    }
+                    if (laserAccumBossDamage > 0 && gameTimeMs - laserAccumBossLastHitMs >= accumFlushMs) {
+                        boss?.let { b ->
+                            val bs = b.rect.shiftByScroll(scrollY)
+                            floatingTexts.add(
+                                FloatingText("-$laserAccumBossDamage", bs.center.copy(y = bs.center.y - 28f), Color(0xFFFF7A3D), 700L)
+                            )
+                        }
                         laserAccumBossDamage = 0
-                        laserAccumTimerMs = 0L
+                        laserAccumBossLastHitMs = 0L
                     }
 
                     // Boss handling
@@ -1600,11 +1618,13 @@ private fun GameScreen() {
                         for (bi in bullets.indices) {
                             val b = bullets[bi]
                             if (circleRectHit(b.pos, b.radius, bossScreen)) {
-                                bossHp -= b.damage
+                                val appliedDamage = min(bossHp, b.damage)
+                                bossHp -= appliedDamage
                                 removedBullets.add(bi)
                                 hitSparks.add(HitSpark(bossScreen.center, 140L))
-                                floatingTexts.add(FloatingText("-${b.damage}", bossScreen.center.copy(y = bossScreen.center.y - 22f), Color(0xFFFFD98A), 360L))
-                                laserAccumBossDamage += b.damage
+                                floatingTexts.add(FloatingText("-$appliedDamage", bossScreen.center.copy(y = bossScreen.center.y - 22f), Color(0xFFFFD98A), 360L))
+                                laserAccumBossDamage += appliedDamage
+                                laserAccumBossLastHitMs = gameTimeMs
                                 addParticles(bossScreen.center, Color(0xFFFFC35A))
                                 shakeMs = 160L
                             }
@@ -1618,6 +1638,7 @@ private fun GameScreen() {
                         bossTelegraphs.clear()
                         bossShots.clear()
                         laserAccumBossDamage = 0
+                        laserAccumBossLastHitMs = 0L
                         coins += (stageIndex + 1) * 15
                         deathBursts.add(DeathBurst(bossScreen.center, 520L, 90f))
                         addParticles(bossScreen.center, Color(0xFFFFC35A))
@@ -2954,7 +2975,7 @@ private fun GameScreen() {
                     drawIntoCanvas { c ->
                         val fill = android.graphics.Paint(uiPaint).apply { color = ft.color.toArgb() }
                         val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
-                    val isAccum = ft.text.startsWith("합계 ")
+                    val isAccum = ft.color == Color(0xFFFF7A3D)
                     val size = if (isAccum) 48f else 38f
                     drawOutlinedText(c.nativeCanvas, stroke, fill, ft.text, ft.pos.x, ft.pos.y, size, android.graphics.Paint.Align.CENTER)
                 }
@@ -3022,6 +3043,15 @@ private fun GameScreen() {
                 }
                 val rateLabel = if (w == null) "-" else String.format("%.1f", 1000f / w.fireRateMs.toFloat())
                 val ammoLabel = if (w == null) "-" else if (w.type == WeaponType.LASER) "${w.laserDurationMs}ms" else "${w.bulletCount}"
+                val hitDamageLabel = if (w == null) "-" else {
+                    val perHit = when (w.type) {
+                        WeaponType.MULTI -> (w.damage * 1.1f).toInt().coerceAtLeast(1)
+                        WeaponType.SPREAD3 -> (w.damage * 0.85f).toInt().coerceAtLeast(1)
+                        WeaponType.HOMING -> w.damage
+                        WeaponType.LASER -> (w.damage * 1.15f).toInt().coerceAtLeast(1)
+                    }
+                    perHit.toString()
+                }
                 val specialLabel = when {
                     w == null -> "특수 없음"
                     w.legendarySplash -> "명중폭발"
@@ -3061,7 +3091,7 @@ private fun GameScreen() {
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        hudChip("공격력", if (w == null) "-" else "${w.damage}", Color(0xFFFFD084))
+                        hudChip("공격력", hitDamageLabel, Color(0xFFFFD084))
                         hudChip("탄환/지속", ammoLabel, Color(0xFF9DE7FF))
                         hudChip("공격속도", if (w == null) "-" else "$rateLabel 회/초", Color(0xFF8CFFB0))
                         hudChip("코인", "$coins", ui.accent)
