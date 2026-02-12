@@ -17,12 +17,15 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.zIndex
 import androidx.compose.material3.Button
@@ -141,6 +144,7 @@ private data class Monster(
     val hp: Int,
     val ranged: Boolean,
     val shotCooldownMs: Long,
+    val rangedShotKind: EnemyShotKind = EnemyShotKind.SPEAR,
     val baseX: Float,
     val zigzagPhase: Float,
     val dashMs: Long,
@@ -151,8 +155,11 @@ private data class Monster(
 private data class EnemyShot(
     val pos: Offset,
     val vel: Offset,
-    val radius: Float
+    val radius: Float,
+    val kind: EnemyShotKind
 )
+
+private enum class EnemyShotKind { SPEAR, AXE }
 
 private data class Bullet(
     val pos: Offset,
@@ -177,6 +184,14 @@ private data class Laser(
     val followPlayer: Boolean = true
 )
 
+private data class ShardRay(
+    val start: Offset,
+    val end: Offset,
+    var lifeMs: Long,
+    val damagePerTick: Int,
+    val width: Float
+)
+
 private data class PendingBurst(
     val fireAt: Long,
     val weapon: WeaponState,
@@ -188,7 +203,7 @@ private data class Boss(
     var hp: Int
 )
 
-private enum class BossShotType { NORMAL, BOMB }
+private enum class BossShotType { NORMAL, BOMB, SIDE_LASER }
 
 private data class BossShot(
     var pos: Offset,
@@ -206,6 +221,13 @@ private data class BossTelegraph(
     val type: BossShotType
 )
 
+private data class BossLaneLaser(
+    val x: Float,
+    val width: Float,
+    var lifeMs: Long,
+    val totalLifeMs: Long
+)
+
 private data class FloatingText(
     val text: String,
     val pos: Offset,
@@ -215,6 +237,12 @@ private data class FloatingText(
 
 private data class GateBurst(
     val pos: Offset,
+    var lifeMs: Long
+)
+
+private data class SplashBurst(
+    val pos: Offset,
+    val radius: Float,
     var lifeMs: Long
 )
 
@@ -387,11 +415,14 @@ private fun GameScreen() {
         val enemyShots = remember { mutableStateListOf<EnemyShot>() }
         val bullets = remember { mutableStateListOf<Bullet>() }
         val lasers = remember { mutableStateListOf<Laser>() }
+        val shardRays = remember { mutableStateListOf<ShardRay>() }
         var boss by remember { mutableStateOf<Boss?>(null) }
         val bossShots = remember { mutableStateListOf<BossShot>() }
         val bossTelegraphs = remember { mutableStateListOf<BossTelegraph>() }
+        val bossLaneLasers = remember { mutableStateListOf<BossLaneLaser>() }
         val floatingTexts = remember { mutableStateListOf<FloatingText>() }
         val gateBursts = remember { mutableStateListOf<GateBurst>() }
+        val splashBursts = remember { mutableStateListOf<SplashBurst>() }
         val deathBursts = remember { mutableStateListOf<DeathBurst>() }
         val muzzleFlashes = remember { mutableStateListOf<MuzzleFlash>() }
         val hitSparks = remember { mutableStateListOf<HitSpark>() }
@@ -399,6 +430,10 @@ private fun GameScreen() {
         val maxParticles = 120
         val drops = remember { mutableStateListOf<Drop>() }
         val pendingBursts = remember { mutableStateListOf<PendingBurst>() }
+        val laserAccumDamageByMonster = remember { mutableMapOf<Int, Int>() }
+        val laserAccumPosByMonster = remember { mutableMapOf<Int, Offset>() }
+        var laserAccumBossDamage by remember { mutableStateOf(0) }
+        var laserAccumTimerMs by remember { mutableStateOf(0L) }
         var paused by remember { mutableStateOf(false) }
         var upgradeChoices by remember { mutableStateOf<List<UpgradeChoice>>(emptyList()) }
         var manualPaused by remember { mutableStateOf(false) }
@@ -513,7 +548,7 @@ private fun GameScreen() {
             val laneCount = 2
             val laneWidth = pathWidth / laneCount
             val minMonstersPerBlock = 1
-            val maxMonstersPerBlock = 3
+            val maxMonstersPerBlock = 2
             val segmentStartMonsterIndex = monsters.size
             val minRangedPerSegment = when (stage) {
                 0 -> 2
@@ -554,15 +589,13 @@ private fun GameScreen() {
                 gatePairs.add(pair)
             }
 
-            // Spawn monsters after each gate (gate -> monsters -> gate), repeat twice
-            val blockOffset = height * 0.55f
-            val blockSpacing = height * 0.30f
-            var minMonsterY = Float.POSITIVE_INFINITY
+            // Spawn monsters between gates with fixed interval fractions (prevents empty gaps).
+            val blockFractions = floatArrayOf(0.34f, 0.70f)
             for (i in gateYs.indices) {
                 val gateY = gateYs[i]
-                repeat(2) { blockIdx ->
-                    val count = rng.nextInt(minMonstersPerBlock, maxMonstersPerBlock + 1)
-                    val lastLaneY = FloatArray(laneCount) { Float.POSITIVE_INFINITY }
+                blockFractions.forEachIndexed { blockIdx, frac ->
+                    val count = if (rng.nextFloat() < 0.62f) minMonstersPerBlock else maxMonstersPerBlock
+                    val usedLanes = mutableSetOf<Int>()
                     var prevLane = rng.nextInt(laneCount)
                     repeat(count) { m ->
                         val lane = when (stage) {
@@ -570,6 +603,8 @@ private fun GameScreen() {
                             2 -> if (m == 0) prevLane else (laneCount - 1 - prevLane) // volcano: forced spread
                             else -> rng.nextInt(laneCount)
                         }
+                        if (count == 2 && lane in usedLanes) return@repeat
+                        usedLanes.add(lane)
                         prevLane = lane
                         val laneCenter = pathLeft + laneWidth * lane + laneWidth / 2f
                         val jitter = when (stage) {
@@ -578,12 +613,7 @@ private fun GameScreen() {
                             else -> (laneWidth * 0.08f) * (rng.nextFloat() * 2f - 1f)
                         }
                         val cx = (laneCenter + jitter).coerceIn(pathLeft + laneWidth * 0.2f, pathRight - laneWidth * 0.2f)
-                        var y = gateY - blockOffset - m * blockSpacing - blockIdx * (height * 0.35f)
-                        val minGap = laneWidth * 0.6f
-                        if (lastLaneY[lane].isFinite() && kotlin.math.abs(y - lastLaneY[lane]) < minGap) {
-                            y -= minGap
-                        }
-                        lastLaneY[lane] = y
+                        val y = gateY - stride * frac - m * (height * 0.06f)
                         val r = laneWidth * 0.20f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
                         val isRanged = (rangedSpawned < maxRangedPerSegment) && (rng.nextFloat() < rangedChance)
@@ -596,6 +626,7 @@ private fun GameScreen() {
                                 hp = if (isRanged) (hpValue * 0.8f).toInt().coerceAtLeast(1) else hpValue,
                                 ranged = isRanged,
                                 shotCooldownMs = (900L + rng.nextInt(800) - stage * 120L).coerceAtLeast(420L),
+                                rangedShotKind = if (isRanged && rng.nextBoolean()) EnemyShotKind.AXE else EnemyShotKind.SPEAR,
                                 baseX = cx,
                                 zigzagPhase = rng.nextFloat() * 6.28f,
                                 dashMs = 0L,
@@ -604,7 +635,6 @@ private fun GameScreen() {
                             )
                         )
                         if (monsters.last().ranged) rangedSpawned += 1
-                        if (y < minMonsterY) minMonsterY = y
                     }
                 }
             }
@@ -660,17 +690,24 @@ private fun GameScreen() {
             enemyShots.clear()
             bullets.clear()
             lasers.clear()
+            shardRays.clear()
             bossShots.clear()
             bossTelegraphs.clear()
+            bossLaneLasers.clear()
             boss = null
             floatingTexts.clear()
             gateBursts.clear()
+            splashBursts.clear()
             deathBursts.clear()
             muzzleFlashes.clear()
             hitSparks.clear()
             particles.clear()
             drops.clear()
             pendingBursts.clear()
+            laserAccumDamageByMonster.clear()
+            laserAccumPosByMonster.clear()
+            laserAccumBossDamage = 0
+            laserAccumTimerMs = 0L
             shakeMs = 0L
             flashMs = 0L
             bossShotTimerMs = 0L
@@ -732,13 +769,20 @@ private fun GameScreen() {
             enemyShots.clear()
             bullets.clear()
             lasers.clear()
+            shardRays.clear()
             bossShots.clear()
             bossTelegraphs.clear()
+            bossLaneLasers.clear()
             boss = null
             drops.clear()
             pendingBursts.clear()
+            laserAccumDamageByMonster.clear()
+            laserAccumPosByMonster.clear()
+            laserAccumBossDamage = 0
+            laserAccumTimerMs = 0L
             floatingTexts.clear()
             gateBursts.clear()
+            splashBursts.clear()
             deathBursts.clear()
             muzzleFlashes.clear()
             hitSparks.clear()
@@ -817,13 +861,28 @@ private fun GameScreen() {
             when (w.type) {
                 WeaponType.LASER -> {
                     lasers.add(Laser(x, w.laserDurationMs, w.damage, w.laserWidth, followPlayer = true))
-                    if (w.legendaryShardLaser) {
-                        val shardDmg = max(1, (w.damage * 0.45f).toInt())
-                        val shardWidth = max(8f, w.laserWidth * 0.45f)
-                        val shardLife = max(180L, (w.laserDurationMs * 0.55f).toLong())
+                    if (w.legendaryShardLaser && Random.Default.nextFloat() < 0.20f) {
+                        // Branch rays inherit upgraded laser stats (damage/width/duration).
+                        val shardDmg = max(1, (w.damage * 0.55f + w.level * 0.15f).toInt())
+                        val shardWidth = max(10f, w.laserWidth * 0.60f)
+                        val shardLife = max(220L, (w.laserDurationMs * 0.70f).toLong())
                         repeat(6) {
-                            val rx = Random.Default.nextFloat() * (pathRight - pathLeft) + pathLeft
-                            lasers.add(Laser(rx, shardLife, shardDmg, shardWidth, followPlayer = false))
+                            val sx = Random.Default.nextFloat() * width
+                            val sy = Random.Default.nextFloat() * playerY
+                            val angleDeg = Random.Default.nextFloat() * 360f
+                            val rad = Math.toRadians(angleDeg.toDouble()).toFloat()
+                            val len = max(width, height) * 2.2f
+                            val dx = cos(rad) * len
+                            val dy = sin(rad) * len
+                            shardRays.add(
+                                ShardRay(
+                                    start = Offset(sx - dx, sy - dy),
+                                    end = Offset(sx + dx, sy + dy),
+                                    lifeMs = shardLife,
+                                    damagePerTick = shardDmg,
+                                    width = shardWidth
+                                )
+                            )
                         }
                     }
                     muzzleFlashes.add(MuzzleFlash(Offset(x, playerY - playerRadius * 0.8f), 120L))
@@ -831,14 +890,18 @@ private fun GameScreen() {
                 }
                 WeaponType.SPREAD3 -> {
                     val count = max(3, w.bulletCount)
-                    val angleStep = (3f + (count - 3) * 0.3f).coerceAtMost(60f)
+                    val maxHalfAngle = (22f + (count - 3) * 4.2f).coerceAtMost(68f)
                     val mid = (count - 1) / 2f
                     for (i in 0 until count) {
-                        val offset = (i - mid) * angleStep
-                        val vx = offset * 0.5f
+                        val t = if (mid == 0f) 0f else (i - mid) / mid
+                        val angle = t * maxHalfAngle
+                        val rad = Math.toRadians(angle.toDouble()).toFloat()
+                        val speed = 11f
+                        val vx = sin(rad) * speed
+                        val vy = -cos(rad) * speed
                         bullets.add(Bullet(
                             Offset(x, playerY),
-                            Offset(vx, -9f),
+                            Offset(vx, vy),
                             (w.damage * 0.85f).toInt().coerceAtLeast(1),
                             false,
                             w.pierce,
@@ -846,7 +909,7 @@ private fun GameScreen() {
                             w.bulletRadius * 1.15f,
                             -1,
                             false,
-                            splashRadius = if (w.legendarySplash) max(26f, w.bulletRadius * 4.8f) else 0f,
+                            splashRadius = if (w.legendarySplash) max(104f, w.bulletRadius * 19.2f) else 0f,
                             splashDamageRatio = if (w.legendarySplash) 0.55f else 0f
                         ))
                     }
@@ -870,7 +933,7 @@ private fun GameScreen() {
                             w.bulletRadius * 0.9f,
                             -1,
                             false,
-                            splashRadius = if (w.legendarySplash) max(24f, w.bulletRadius * 4.5f) else 0f,
+                            splashRadius = if (w.legendarySplash) max(96f, w.bulletRadius * 18.0f) else 0f,
                             splashDamageRatio = if (w.legendarySplash) 0.5f else 0f
                         ))
                     }
@@ -970,6 +1033,7 @@ private fun GameScreen() {
                         val spawnY = currentBossForShots.rect.shiftByScroll(scrollY).bottom - 10f
                         val centerX = (pathLeft + pathRight) * 0.5f
                         val warnDelay = 300L
+                        val laneWarnDelay = 720L
 
                         if (bossPatternCooldownMs > 0L) bossPatternCooldownMs -= dt
                         if (bossVolleyRemaining > 0) {
@@ -1000,7 +1064,7 @@ private fun GameScreen() {
                             }
                         }
 
-                        val patternBusy = bossVolleyRemaining > 0 || bossTelegraphs.isNotEmpty()
+                        val patternBusy = bossVolleyRemaining > 0 || bossTelegraphs.isNotEmpty() || bossLaneLasers.isNotEmpty()
                         if (bossPatternCooldownMs <= 0L && !patternBusy) {
                             // Stage-specific pattern sets.
                             val patternCount = when (stage) {
@@ -1019,13 +1083,22 @@ private fun GameScreen() {
                                         else -> 820L
                                     }
                                 }
-                                1 -> { // central bomb
+                                1 -> { // stage2: one-side lane laser / stage3: central bomb
                                     if (stage == 1) {
-                                        // Stage 2: side straight shots
-                                        val leftX = pathLeft + pathWidth * 0.2f
-                                        val rightX = pathLeft + pathWidth * 0.8f
-                                        bossTelegraphs.add(BossTelegraph(Offset(leftX, spawnY), Offset(leftX, height * 1.1f), warnDelay, Offset(0f, shotSpeed), 60f, BossShotType.NORMAL))
-                                        bossTelegraphs.add(BossTelegraph(Offset(rightX, spawnY), Offset(rightX, height * 1.1f), warnDelay, Offset(0f, shotSpeed), 60f, BossShotType.NORMAL))
+                                        // Stage 2: one-side lane laser
+                                        val leftX = pathLeft + pathWidth * 0.25f
+                                        val rightX = pathLeft + pathWidth * 0.75f
+                                        val laneX = if (rng.nextBoolean()) leftX else rightX
+                                        bossTelegraphs.add(
+                                            BossTelegraph(
+                                                Offset(laneX, spawnY),
+                                                Offset(laneX, height * 1.1f),
+                                                laneWarnDelay,
+                                                Offset.Zero,
+                                                pathWidth * 0.25f,
+                                                BossShotType.SIDE_LASER
+                                            )
+                                        )
                                         bossPatternCooldownMs = 850L
                                     } else {
                                         // Stage 3: central bomb
@@ -1035,11 +1108,20 @@ private fun GameScreen() {
                                         bossPatternCooldownMs = 780L
                                     }
                                 }
-                                2 -> { // side straight shots
-                                    val leftX = pathLeft + pathWidth * 0.2f
-                                    val rightX = pathLeft + pathWidth * 0.8f
-                                    bossTelegraphs.add(BossTelegraph(Offset(leftX, spawnY), Offset(leftX, height * 1.1f), warnDelay, Offset(0f, shotSpeed), 60f, BossShotType.NORMAL))
-                                    bossTelegraphs.add(BossTelegraph(Offset(rightX, spawnY), Offset(rightX, height * 1.1f), warnDelay, Offset(0f, shotSpeed), 60f, BossShotType.NORMAL))
+                                2 -> { // stage3: one-side lane laser
+                                    val leftX = pathLeft + pathWidth * 0.25f
+                                    val rightX = pathLeft + pathWidth * 0.75f
+                                    val laneX = if (rng.nextBoolean()) leftX else rightX
+                                    bossTelegraphs.add(
+                                        BossTelegraph(
+                                            Offset(laneX, spawnY),
+                                            Offset(laneX, height * 1.1f),
+                                            laneWarnDelay,
+                                            Offset.Zero,
+                                            pathWidth * 0.25f,
+                                            BossShotType.SIDE_LASER
+                                        )
+                                    )
                                     bossPatternCooldownMs = 780L
                                 }
                             }
@@ -1057,6 +1139,11 @@ private fun GameScreen() {
                         enemyShots[i] = s.copy(pos = s.pos + s.vel)
                     }
                     enemyShots.removeAll { it.pos.y > height + 120f }
+                    for (i in bossLaneLasers.indices) {
+                        val l = bossLaneLasers[i]
+                        bossLaneLasers[i] = l.copy(lifeMs = l.lifeMs - dt)
+                    }
+                    bossLaneLasers.removeAll { it.lifeMs <= 0L }
 
                     // Boss telegraphs -> fire
                     if (bossTelegraphs.isNotEmpty()) {
@@ -1065,7 +1152,12 @@ private fun GameScreen() {
                             val t = bossTelegraphs[i]
                             val next = t.delayMs - dt
                             if (next <= 0L) {
-                                bossShots.add(BossShot(t.start, t.vel, t.radius, t.type))
+                                if (t.type == BossShotType.SIDE_LASER) {
+                                    val life = 480L
+                                    bossLaneLasers.add(BossLaneLaser(t.start.x, t.radius * 2f, life, life))
+                                } else {
+                                    bossShots.add(BossShot(t.start, t.vel, t.radius, t.type))
+                                }
                                 fired.add(i)
                             } else {
                                 bossTelegraphs[i] = t.copy(delayMs = next)
@@ -1125,17 +1217,18 @@ private fun GameScreen() {
                             shotCd = max(0L, shotCd - dt)
                             val ms = newPos.shiftByScroll(scrollY)
                             if (shotCd == 0L && ms.y < playerY - 20f && ms.y > 0f) {
-                                val dx = playerX - ms.x
-                                val dy = playerY - ms.y
-                                val len = max(1f, hypot(dx, dy))
-                                val speedShot = when (stage) {
+                                val baseSpeed = when (stage) {
                                     0 -> 6.8f
                                     1 -> 7.8f
                                     else -> 9.0f
                                 }
-                                val vx = dx / len * speedShot
-                                val vy = dy / len * speedShot
-                                enemyShots.add(EnemyShot(ms, Offset(vx, vy), 12f))
+                                val kind = m.rangedShotKind
+                                val speedShot = if (kind == EnemyShotKind.SPEAR) baseSpeed * 1.22f else baseSpeed * 0.86f
+                                // Ranged monsters fire straight downward lanes (non-tracking).
+                                val vx = 0f
+                                val vy = speedShot
+                                val radius = if (kind == EnemyShotKind.SPEAR) 9f else 16f
+                                enemyShots.add(EnemyShot(ms, Offset(vx, vy), radius, kind))
                                 shotCd = when (stage) {
                                     0 -> 980L
                                     1 -> 760L
@@ -1163,6 +1256,11 @@ private fun GameScreen() {
                         }
                     }
                     lasers.removeAll { it.lifeMs <= 0L }
+                    for (i in shardRays.indices) {
+                        val r = shardRays[i]
+                        shardRays[i] = r.copy(lifeMs = r.lifeMs - dt)
+                    }
+                    shardRays.removeAll { it.lifeMs <= 0L }
 
                     for (i in floatingTexts.indices) {
                         val t = floatingTexts[i]
@@ -1174,6 +1272,11 @@ private fun GameScreen() {
                         gateBursts[i] = b.copy(lifeMs = b.lifeMs - dt)
                     }
                     gateBursts.removeAll { it.lifeMs <= 0L }
+                    for (i in splashBursts.indices) {
+                        val b = splashBursts[i]
+                        splashBursts[i] = b.copy(lifeMs = b.lifeMs - dt)
+                    }
+                    splashBursts.removeAll { it.lifeMs <= 0L }
                     for (i in deathBursts.indices) {
                         val b = deathBursts[i]
                         deathBursts[i] = b.copy(lifeMs = b.lifeMs - dt)
@@ -1283,6 +1386,7 @@ private fun GameScreen() {
                                     val newHp = m.hp - b.damage
                                     if (newHp <= 0) removedMonsters.add(mi) else monsters[mi] = m.copy(hp = newHp)
                                     if (b.splashRadius > 0f) {
+                                        splashBursts.add(SplashBurst(ms, b.splashRadius, 220L))
                                         val splashDamage = max(1, (b.damage * b.splashDamageRatio).toInt())
                                         for (si in monsters.indices) {
                                             if (si == mi) continue
@@ -1292,7 +1396,9 @@ private fun GameScreen() {
                                                 val hp2 = sm.hp - splashDamage
                                                 if (hp2 <= 0) removedMonsters.add(si) else monsters[si] = sm.copy(hp = hp2)
                                                 hitSparks.add(HitSpark(ss, 120L))
-                                                floatingTexts.add(FloatingText("-$splashDamage", ss.copy(y = ss.y - 12f), Color(0xFFFFB36B), 420L))
+                                                floatingTexts.add(FloatingText("-$splashDamage", ss.copy(y = ss.y - 10f), Color(0xFFFFB36B), 360L))
+                                                laserAccumDamageByMonster[sm.id] = (laserAccumDamageByMonster[sm.id] ?: 0) + splashDamage
+                                                laserAccumPosByMonster[sm.id] = ss
                                             }
                                         }
                                     }
@@ -1302,7 +1408,9 @@ private fun GameScreen() {
                                         removedBullets.add(bi)
                                     }
                                     hitSparks.add(HitSpark(ms, 140L))
-                                    floatingTexts.add(FloatingText("-${b.damage}", ms.copy(y = ms.y - 18f), Color(0xFFFFC35A), 520L))
+                                    floatingTexts.add(FloatingText("-${b.damage}", ms.copy(y = ms.y - 16f), Color(0xFFFFD98A), 360L))
+                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + b.damage
+                                    laserAccumPosByMonster[m.id] = ms
                                     addParticles(ms, Color(0xFFFFC35A))
                                     shakeMs = 120L
                                     break
@@ -1331,7 +1439,7 @@ private fun GameScreen() {
                         lasers.forEach { l ->
                         val laserX = l.x
                         val laserHalf = l.width * 0.5f
-                        val laserDmg = l.damagePerTick
+                        val laserDmg = max(1, (l.damagePerTick * 1.15f).toInt())
                             // Laser hits only the first monster it meets
                             var hitIndex: Int? = null
                             var hitY = Float.NEGATIVE_INFINITY
@@ -1349,7 +1457,9 @@ private fun GameScreen() {
                                 val m = monsters[hitIndex!!]
                                 monsters[hitIndex!!] = m.copy(hp = m.hp - laserDmg)
                                 hitSparks.add(HitSpark(m.pos.shiftByScroll(scrollY), 140L))
-                                floatingTexts.add(FloatingText("-$laserDmg", m.pos.shiftByScroll(scrollY).copy(y = m.pos.shiftByScroll(scrollY).y - 18f), Color(0xFFFFC35A), 520L))
+                                floatingTexts.add(FloatingText("-$laserDmg", m.pos.shiftByScroll(scrollY).copy(y = m.pos.shiftByScroll(scrollY).y - 18f), Color(0xFFFFD98A), 340L))
+                                laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + laserDmg
+                                laserAccumPosByMonster[m.id] = m.pos.shiftByScroll(scrollY)
                                 if (monsters[hitIndex!!].hp <= 0) {
                                     val dead = monsters[hitIndex!!]
                                     val roll = rng.nextFloat()
@@ -1371,10 +1481,114 @@ private fun GameScreen() {
                                     val bs = b.rect.shiftByScroll(scrollY)
                                     if (bs.bottom <= playerY && bs.top >= laserTop && laserX >= bs.left - laserHalf && laserX <= bs.right + laserHalf) {
                                         boss = b.copy(hp = b.hp - laserDmg)
+                                        laserAccumBossDamage += laserDmg
                                     }
                                 }
                             }
                         }
+                    }
+                    if (shardRays.isNotEmpty()) {
+                        val shardTickThisFrame = (gameTimeMs / 24L) % 2L == 0L
+                        if (shardTickThisFrame) {
+                            for (r in shardRays) {
+                                val abx = r.end.x - r.start.x
+                                val aby = r.end.y - r.start.y
+                                val ab2 = max(0.0001f, abx * abx + aby * aby)
+                                var bestT = Float.POSITIVE_INFINITY
+                                var hitMonsterIndex: Int? = null
+                                var hitBoss = false
+                                var hitPos = r.end
+
+                                for (mi in monsters.indices) {
+                                    val m = monsters[mi]
+                                    val ms = m.pos.shiftByScroll(scrollY)
+                                    if (ms.y > playerY) continue
+                                    if (!circleSegmentHit(ms, m.radius, r.start, r.end, r.width * 0.5f)) continue
+                                    val t = (((ms.x - r.start.x) * abx + (ms.y - r.start.y) * aby) / ab2).coerceIn(0f, 1f)
+                                    if (t < bestT) {
+                                        bestT = t
+                                        hitMonsterIndex = mi
+                                        hitBoss = false
+                                        hitPos = Offset(r.start.x + abx * t, r.start.y + aby * t)
+                                    }
+                                }
+
+                                boss?.let { b ->
+                                    val bs = b.rect.shiftByScroll(scrollY)
+                                    val samples = listOf(
+                                        bs.center,
+                                        bs.topLeft,
+                                        Offset(bs.right, bs.top),
+                                        Offset(bs.left, bs.bottom),
+                                        Offset(bs.right, bs.bottom)
+                                    )
+                                    for (p in samples) {
+                                        if (!circleSegmentHit(p, 8f, r.start, r.end, r.width * 0.5f)) continue
+                                        val t = (((p.x - r.start.x) * abx + (p.y - r.start.y) * aby) / ab2).coerceIn(0f, 1f)
+                                        if (t < bestT) {
+                                            bestT = t
+                                            hitMonsterIndex = null
+                                            hitBoss = true
+                                            hitPos = Offset(r.start.x + abx * t, r.start.y + aby * t)
+                                        }
+                                    }
+                                }
+
+                                if (hitMonsterIndex != null) {
+                                    val m = monsters[hitMonsterIndex!!]
+                                    monsters[hitMonsterIndex!!] = m.copy(hp = m.hp - r.damagePerTick)
+                                    laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + r.damagePerTick
+                                    laserAccumPosByMonster[m.id] = m.pos.shiftByScroll(scrollY)
+                                    hitSparks.add(HitSpark(hitPos, 100L))
+                                } else if (hitBoss) {
+                                    boss?.let { b ->
+                                        boss = b.copy(hp = b.hp - r.damagePerTick)
+                                        floatingTexts.add(FloatingText("-${r.damagePerTick}", hitPos.copy(y = hitPos.y - 16f), Color(0xFFFFD98A), 340L))
+                                        laserAccumBossDamage += r.damagePerTick
+                                        hitSparks.add(HitSpark(hitPos, 100L))
+                                    }
+                                }
+                            }
+                            monsters.indices.reversed().forEach { i ->
+                                if (monsters[i].hp <= 0) {
+                                    val dead = monsters[i]
+                                    val roll = rng.nextFloat()
+                                    if (roll < 0.176f) drops.add(Drop(dead.pos, DropKind.UPGRADE))
+                                    else if (roll < 0.44f) drops.add(Drop(dead.pos, DropKind.COIN))
+                                    deathBursts.add(DeathBurst(dead.pos.shiftByScroll(scrollY), 260L, 28f))
+                                    addParticles(dead.pos.shiftByScroll(scrollY), Color(0xFFFFC35A))
+                                    monsters.removeAt(i)
+                                }
+                            }
+                        }
+                    }
+
+                    // Aggregate continuous-hit damage numbers for readability.
+                    laserAccumTimerMs += dt
+                    if (laserAccumTimerMs >= 180L) {
+                        laserAccumDamageByMonster.forEach { (id, dmg) ->
+                            if (dmg > 0) {
+                                val pos = laserAccumPosByMonster[id]
+                                    ?: monsters.firstOrNull { it.id == id }?.pos?.shiftByScroll(scrollY)
+                                if (pos != null) {
+                                    floatingTexts.add(
+                                        FloatingText("합계 -$dmg", pos.copy(y = pos.y - 20f), Color(0xFFFF7A3D), 700L)
+                                    )
+                                }
+                            }
+                        }
+                        if (laserAccumBossDamage > 0) {
+                            boss?.let { b ->
+                                val bs = b.rect.shiftByScroll(scrollY)
+                                floatingTexts.add(
+                                    FloatingText("합계 -$laserAccumBossDamage", bs.center.copy(y = bs.center.y - 28f), Color(0xFFFF7A3D), 700L)
+                                )
+                            }
+                        }
+                        laserAccumDamageByMonster.clear()
+                        laserAccumPosByMonster.clear()
+                        laserAccumBossDamage = 0
+                        laserAccumTimerMs = 0L
                     }
 
                     // Boss handling
@@ -1389,7 +1603,8 @@ private fun GameScreen() {
                                 bossHp -= b.damage
                                 removedBullets.add(bi)
                                 hitSparks.add(HitSpark(bossScreen.center, 140L))
-                                floatingTexts.add(FloatingText("-${b.damage}", bossScreen.center.copy(y = bossScreen.center.y - 28f), Color(0xFFFFC35A), 520L))
+                                floatingTexts.add(FloatingText("-${b.damage}", bossScreen.center.copy(y = bossScreen.center.y - 22f), Color(0xFFFFD98A), 360L))
+                                laserAccumBossDamage += b.damage
                                 addParticles(bossScreen.center, Color(0xFFFFC35A))
                                 shakeMs = 160L
                             }
@@ -1399,6 +1614,10 @@ private fun GameScreen() {
 
                     if (bossHp <= 0) {
                         boss = null
+                        bossLaneLasers.clear()
+                        bossTelegraphs.clear()
+                        bossShots.clear()
+                        laserAccumBossDamage = 0
                         coins += (stageIndex + 1) * 15
                         deathBursts.add(DeathBurst(bossScreen.center, 520L, 90f))
                         addParticles(bossScreen.center, Color(0xFFFFC35A))
@@ -1427,6 +1646,13 @@ private fun GameScreen() {
                         running = false
                     }
                     if (bossShots.any { circleHit(playerPos, playerRadius, it.pos, it.radius) }) {
+                        running = false
+                    }
+                    if (bossLaneLasers.any {
+                            val ratio = (it.lifeMs.toFloat() / max(1L, it.totalLifeMs).toFloat()).coerceIn(0f, 1f)
+                            val currentWidth = it.width * (0.20f + 1.10f * ratio)
+                            abs(playerPos.x - it.x) <= (currentWidth * 0.5f + playerRadius * 0.6f)
+                        }) {
                         running = false
                     }
                     if (enemyShots.any { circleHit(playerPos, playerRadius, it.pos, it.radius) }) {
@@ -2208,11 +2434,28 @@ private fun GameScreen() {
                 // Boss shots
                 bossTelegraphs.forEach { t ->
                     val pulse = 0.35f + 0.45f * abs(sin(gameTimeMs * 0.02f))
+                    val warnColor = if (t.type == BossShotType.SIDE_LASER) Color(0xFFFF2E2E) else Color(0xFFFF3D3D)
                     drawLine(
-                        Color(0xFFFF3D3D).copy(alpha = 0.45f * pulse),
+                        warnColor.copy(alpha = 0.55f * pulse),
                         t.start,
                         t.end,
                         strokeWidth = t.radius * 2f
+                    )
+                }
+                bossLaneLasers.forEach { l ->
+                    val ratio = (l.lifeMs.toFloat() / max(1L, l.totalLifeMs).toFloat()).coerceIn(0f, 1f)
+                    val w = l.width * (0.20f + 1.10f * ratio)
+                    val a = 0.18f + 0.72f * ratio
+                    val beamH = height + 60f
+                    drawRect(
+                        Color(0xFFFF2E2E).copy(alpha = 0.55f * a),
+                        topLeft = Offset(l.x - w * 0.5f, 0f),
+                        size = androidx.compose.ui.geometry.Size(w, beamH)
+                    )
+                    drawRect(
+                        Color(0xFFFFB3B3).copy(alpha = 0.92f * a),
+                        topLeft = Offset(l.x - w * 0.18f, 0f),
+                        size = androidx.compose.ui.geometry.Size(w * 0.36f, beamH)
                     )
                 }
                 bossShots.forEach { s ->
@@ -2222,69 +2465,107 @@ private fun GameScreen() {
                     drawCircle(inner, s.radius * 0.5f, s.pos)
                 }
                 enemyShots.forEach { s ->
-                    drawCircle(Color(0xFFFF3D3D).copy(alpha = 0.75f), s.radius, s.pos)
-                    drawCircle(ui.text.copy(alpha = 0.9f), s.radius * 0.45f, s.pos)
+                    val len = max(1f, hypot(s.vel.x, s.vel.y))
+                    val dir = Offset(s.vel.x / len, s.vel.y / len)
+                    val perp = Offset(-dir.y, dir.x)
+                    val r = s.radius
+                    when (s.kind) {
+                        EnemyShotKind.SPEAR -> {
+                            val tip = s.pos + dir * (r * 1.7f)
+                            val neck = s.pos - dir * (r * 0.55f)
+                            val tail = s.pos - dir * (r * 1.8f)
+                            drawLine(Color(0xFF6B4B2A), tail, neck, max(2f, r * 0.45f))
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo(tip.x, tip.y)
+                                    lineTo((neck + perp * (r * 0.85f)).x, (neck + perp * (r * 0.85f)).y)
+                                    lineTo((neck - perp * (r * 0.85f)).x, (neck - perp * (r * 0.85f)).y)
+                                    close()
+                                },
+                                color = Color(0xFFC8C8C8)
+                            )
+                        }
+                        EnemyShotKind.AXE -> {
+                            val head = s.pos + dir * (r * 0.5f)
+                            val handleA = s.pos - dir * (r * 1.5f)
+                            val handleB = s.pos + dir * (r * 1.2f)
+                            drawLine(Color(0xFF6B4B2A), handleA, handleB, max(2f, r * 0.4f))
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo((head + perp * (r * 1.1f)).x, (head + perp * (r * 1.1f)).y)
+                                    lineTo((head + dir * (r * 0.7f)).x, (head + dir * (r * 0.7f)).y)
+                                    lineTo((head - perp * (r * 1.1f)).x, (head - perp * (r * 1.1f)).y)
+                                    lineTo((head - dir * (r * 0.25f)).x, (head - dir * (r * 0.25f)).y)
+                                    close()
+                                },
+                                color = Color(0xFFBDBDBD)
+                            )
+                        }
+                    }
                 }
                 // Boss wall (forest gate)
                 boss?.let { b ->
                     val bs = b.rect.shiftByScroll(scrollY)
-                    drawRoundRect(theme.bossDark, bs.topLeft, bs.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f))
-                    drawRoundRect(
-                        color = theme.bossMid,
-                        topLeft = bs.topLeft + Offset(8f, 8f),
-                        size = androidx.compose.ui.geometry.Size(bs.width - 16f, bs.height - 16f),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f)
+                    val c = bs.center
+                    val br = min(bs.width, bs.height) * 0.42f
+                    // shadow + aura
+                    drawOval(
+                        color = Color.Black.copy(alpha = 0.32f),
+                        topLeft = Offset(c.x - br * 0.95f, c.y + br * 0.72f),
+                        size = androidx.compose.ui.geometry.Size(br * 1.9f, br * 0.46f)
                     )
-                    // face panel
-                    val faceW = bs.width * 0.62f
-                    val faceH = bs.height * 0.6f
-                    val faceTop = bs.center.y - faceH * 0.5f
-                    drawRoundRect(
-                        color = theme.bossDark,
-                        topLeft = Offset(bs.center.x - faceW * 0.5f, faceTop),
-                        size = androidx.compose.ui.geometry.Size(faceW, faceH),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f, 14f)
-                    )
-                    // eyes
-                    val eyeY = faceTop + faceH * 0.35f
-                    val eyeOffsetX = faceW * 0.22f
-                    drawCircle(theme.bossLight, faceH * 0.12f, Offset(bs.center.x - eyeOffsetX, eyeY))
-                    drawCircle(theme.bossLight, faceH * 0.12f, Offset(bs.center.x + eyeOffsetX, eyeY))
-                    // crown
+                    drawCircle(theme.glow.copy(alpha = 0.18f), br * 1.25f, c)
+                    // body/head (monster-like)
+                    drawCircle(theme.bossDark, br, c)
+                    drawCircle(theme.bossMid, br * 0.86f, Offset(c.x, c.y - br * 0.06f))
+                    drawCircle(theme.bossLight.copy(alpha = 0.26f), br * 0.40f, Offset(c.x - br * 0.28f, c.y - br * 0.25f))
+                    // horns
                     drawPath(
                         path = Path().apply {
-                            moveTo(bs.center.x - faceW * 0.35f, faceTop - faceH * 0.15f)
-                            lineTo(bs.center.x - faceW * 0.15f, faceTop - faceH * 0.35f)
-                            lineTo(bs.center.x, faceTop - faceH * 0.1f)
-                            lineTo(bs.center.x + faceW * 0.15f, faceTop - faceH * 0.35f)
-                            lineTo(bs.center.x + faceW * 0.35f, faceTop - faceH * 0.15f)
+                            moveTo(c.x - br * 0.52f, c.y - br * 0.66f)
+                            lineTo(c.x - br * 1.05f, c.y - br * 1.02f)
+                            lineTo(c.x - br * 0.58f, c.y - br * 0.22f)
                             close()
                         },
-                        color = theme.bossLight
+                        color = theme.bossDark
+                    )
+                    drawPath(
+                        path = Path().apply {
+                            moveTo(c.x + br * 0.52f, c.y - br * 0.66f)
+                            lineTo(c.x + br * 1.05f, c.y - br * 1.02f)
+                            lineTo(c.x + br * 0.58f, c.y - br * 0.22f)
+                            close()
+                        },
+                        color = theme.bossDark
+                    )
+                    // eyes + mouth
+                    val eyeY = c.y - br * 0.10f
+                    drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x - br * 0.30f, eyeY))
+                    drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x + br * 0.30f, eyeY))
+                    drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x - br * 0.27f, eyeY - br * 0.04f))
+                    drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x + br * 0.27f, eyeY - br * 0.04f))
+                    drawLine(
+                        Color(0xFF2A1B12),
+                        Offset(c.x - br * 0.34f, c.y + br * 0.30f),
+                        Offset(c.x + br * 0.34f, c.y + br * 0.30f),
+                        br * 0.10f
+                    )
+                    drawRect(
+                        Color(0xFFFFE2A6),
+                        topLeft = Offset(c.x - br * 0.20f, c.y + br * 0.25f),
+                        size = androidx.compose.ui.geometry.Size(br * 0.40f, br * 0.10f)
                     )
                     when (theme.name) {
                         "SWAMP" -> {
-                            val dripCount = 4
-                            repeat(dripCount) { i ->
-                                val x = bs.left + bs.width * (0.15f + i * 0.18f)
-                                val y1 = bs.bottom - bs.height * 0.08f
-                                val y2 = bs.bottom + bs.height * (0.08f + i * 0.02f)
-                                drawLine(theme.glow.copy(alpha = 0.6f), Offset(x, y1), Offset(x, y2), 6f)
+                            repeat(3) { i ->
+                                val x = c.x + (i - 1) * br * 0.45f
+                                drawLine(theme.glow.copy(alpha = 0.55f), Offset(x, c.y + br * 0.72f), Offset(x, c.y + br * 1.05f), 5f)
                             }
-                            drawCircle(theme.glow.copy(alpha = 0.4f), bs.height * 0.08f, Offset(bs.left + bs.width * 0.1f, bs.center.y))
-                            drawCircle(theme.glow.copy(alpha = 0.4f), bs.height * 0.08f, Offset(bs.right - bs.width * 0.1f, bs.center.y))
-                            // slime veins
-                            drawLine(theme.glow.copy(alpha = 0.5f), Offset(bs.left + bs.width * 0.2f, bs.top + bs.height * 0.25f), Offset(bs.right - bs.width * 0.25f, bs.top + bs.height * 0.45f), 4f)
-                            drawLine(theme.glow.copy(alpha = 0.4f), Offset(bs.left + bs.width * 0.35f, bs.bottom - bs.height * 0.25f), Offset(bs.right - bs.width * 0.15f, bs.bottom - bs.height * 0.12f), 3f)
                         }
                         "VOLCANO" -> {
-                            drawLine(theme.glow, Offset(bs.left + bs.width * 0.15f, bs.center.y), Offset(bs.right - bs.width * 0.15f, bs.center.y + bs.height * 0.05f), 5f)
-                            drawLine(theme.glow.copy(alpha = 0.8f), Offset(bs.center.x - bs.width * 0.2f, bs.top + bs.height * 0.2f), Offset(bs.center.x + bs.width * 0.1f, bs.bottom - bs.height * 0.2f), 4f)
-                            drawCircle(theme.glow.copy(alpha = 0.6f), bs.height * 0.08f, bs.center)
-                            // flame vents
                             repeat(3) { i ->
-                                val x = bs.left + bs.width * (0.25f + i * 0.2f)
-                                drawLine(theme.glow.copy(alpha = 0.9f), Offset(x, bs.top + bs.height * 0.15f), Offset(x, bs.top - bs.height * 0.12f), 3.5f)
+                                val x = c.x + (i - 1) * br * 0.38f
+                                drawLine(theme.glow.copy(alpha = 0.85f), Offset(x, c.y - br * 0.95f), Offset(x, c.y - br * 1.22f), 3.5f)
                             }
                         }
                     }
@@ -2301,46 +2582,171 @@ private fun GameScreen() {
                     val tip = Color(0xFFFFE2A6)
                     val glow = Color(0xFFFF7A3D)
                     val r = b.radius
+                    val len = max(1f, hypot(b.vel.x, b.vel.y))
+                    val dir = Offset(b.vel.x / len, b.vel.y / len)
+                    val perp = Offset(-dir.y, dir.x)
+                    val head = b.pos + dir * (r * 2.0f)
+                    val neck = b.pos - dir * (r * 0.6f)
+                    val tail = b.pos - dir * (r * 1.9f)
                     // glow
                     drawCircle(glow.copy(alpha = 0.25f), r * 1.6f, b.pos)
                     // shaft
-                    drawLine(shaft, Offset(b.pos.x, b.pos.y + r * 1.3f), Offset(b.pos.x, b.pos.y - r * 2.2f), max(2f, r * 0.6f))
+                    drawLine(shaft, tail, neck, max(2f, r * 0.6f))
                     // arrowhead
                     drawPath(
                         path = Path().apply {
-                            moveTo(b.pos.x, b.pos.y - r * 2.6f)
-                            lineTo(b.pos.x - r * 1.2f, b.pos.y - r * 1.2f)
-                            lineTo(b.pos.x + r * 1.2f, b.pos.y - r * 1.2f)
+                            moveTo(head.x, head.y)
+                            lineTo((neck + perp * (r * 1.0f)).x, (neck + perp * (r * 1.0f)).y)
+                            lineTo((neck - perp * (r * 1.0f)).x, (neck - perp * (r * 1.0f)).y)
                             close()
                         },
                         color = tip
                     )
                     // fletching
-                    drawLine(tip.copy(alpha = 0.9f), Offset(b.pos.x - r * 1.0f, b.pos.y + r * 1.0f), Offset(b.pos.x + r * 1.0f, b.pos.y + r * 1.3f), max(1.5f, r * 0.4f))
-                    drawLine(tip.copy(alpha = 0.7f), Offset(b.pos.x - r * 1.0f, b.pos.y + r * 0.4f), Offset(b.pos.x + r * 1.0f, b.pos.y + r * 0.7f), max(1.2f, r * 0.35f))
+                    val f1 = tail + perp * (r * 0.85f)
+                    val f2 = tail - perp * (r * 0.85f)
+                    val fTip = tail + dir * (r * 0.65f)
+                    drawLine(tip.copy(alpha = 0.9f), f1, fTip, max(1.5f, r * 0.4f))
+                    drawLine(tip.copy(alpha = 0.9f), f2, fTip, max(1.5f, r * 0.4f))
                 }
 
                 // Laser
                 lasers.forEach { l ->
                     val w = l.width
+                    val laserX = l.x
+                    val laserHalf = w * 0.5f
+                    var stopY = 0f
+                    var hit = false
+                    // Stop at first monster hit (closest to player)
+                    for (i in monsters.indices) {
+                        val m = monsters[i]
+                        val ms = m.pos.shiftByScroll(scrollY)
+                        if (ms.y <= playerY && ms.y >= 0f && abs(ms.x - laserX) < (m.radius + laserHalf)) {
+                            if (!hit || ms.y > stopY) {
+                                stopY = ms.y
+                                hit = true
+                            }
+                        }
+                    }
+                    // If no monster, stop at boss
+                    if (!hit) {
+                        boss?.let { b ->
+                            val bs = b.rect.shiftByScroll(scrollY)
+                            if (bs.bottom <= playerY && bs.top >= 0f && laserX >= bs.left - laserHalf && laserX <= bs.right + laserHalf) {
+                                stopY = bs.bottom
+                                hit = true
+                            }
+                        }
+                    }
+                    val beamTop = if (hit) stopY else 0f
+                    val beamHeight = (playerY - beamTop).coerceAtLeast(0f)
                     // outer glow
                     drawRect(
                         Color(0xFFFFC35A).copy(alpha = 0.35f),
-                        topLeft = Offset(l.x - w * 0.5f, 0f),
-                        size = androidx.compose.ui.geometry.Size(w, playerY)
+                        topLeft = Offset(laserX - w * 0.5f, beamTop),
+                        size = androidx.compose.ui.geometry.Size(w, beamHeight)
                     )
                     // inner beam
                     drawRect(
                         Color(0xFFFFC35A).copy(alpha = 0.6f),
-                        topLeft = Offset(l.x - w * 0.28f, 0f),
-                        size = androidx.compose.ui.geometry.Size(w * 0.56f, playerY)
+                        topLeft = Offset(laserX - w * 0.28f, beamTop),
+                        size = androidx.compose.ui.geometry.Size(w * 0.56f, beamHeight)
                     )
                     // core
                     drawRect(
                         Color(0xFFFFE2A6),
-                        topLeft = Offset(l.x - w * 0.12f, 0f),
-                        size = androidx.compose.ui.geometry.Size(w * 0.24f, playerY)
+                        topLeft = Offset(laserX - w * 0.12f, beamTop),
+                        size = androidx.compose.ui.geometry.Size(w * 0.24f, beamHeight)
                     )
+                    // impact effect at stop point
+                    if (hit) {
+                        val impact = Offset(laserX, stopY)
+                        drawCircle(Color(0xFFFF7A3D).copy(alpha = 0.38f), w * 0.9f, impact)
+                        drawCircle(Color(0xFFFFE2A6).copy(alpha = 0.95f), w * 0.26f, impact)
+                        drawCircle(
+                            Color(0xFFFFC35A).copy(alpha = 0.85f),
+                            w * 0.55f,
+                            impact,
+                            style = Stroke(width = max(2f, w * 0.10f))
+                        )
+                    }
+                    // energy burst at laser origin
+                    val origin = Offset(l.x, playerY)
+                    val pulse = 0.55f + 0.45f * abs(sin(gameTimeMs * 0.045f))
+                    val pulseR = w * (0.95f + 0.35f * pulse)
+                    drawCircle(Color(0xFFFF7A3D).copy(alpha = 0.28f * pulse), w * 1.75f, origin)
+                    drawCircle(Color(0xFFFFA84D).copy(alpha = 0.38f * pulse), pulseR, origin, style = Stroke(width = max(2f, w * 0.12f)))
+                    drawCircle(Color(0xFFFFE2A6).copy(alpha = 0.96f), w * 0.42f, origin)
+                    drawCircle(
+                        Color(0xFFFFC35A).copy(alpha = 0.90f),
+                        w * 0.92f,
+                        origin,
+                        style = Stroke(width = max(2f, w * 0.16f))
+                    )
+                    repeat(6) { i ->
+                        val ang = (i / 6f) * (Math.PI * 2.0).toFloat() + gameTimeMs * 0.0025f
+                        val r1 = w * 0.65f
+                        val r2 = w * 1.25f
+                        drawLine(
+                            Color(0xFFFFD58A).copy(alpha = 0.72f * pulse),
+                            start = origin + Offset(cos(ang) * r1, sin(ang) * r1),
+                            end = origin + Offset(cos(ang) * r2, sin(ang) * r2),
+                            strokeWidth = max(1.8f, w * 0.08f)
+                        )
+                    }
+                }
+                shardRays.forEach { r ->
+                    val a = (r.lifeMs / 260f).coerceIn(0f, 1f)
+                    val abx = r.end.x - r.start.x
+                    val aby = r.end.y - r.start.y
+                    val ab2 = max(0.0001f, abx * abx + aby * aby)
+                    var bestT = Float.POSITIVE_INFINITY
+                    var stop = r.end
+                    for (m in monsters) {
+                        val ms = m.pos.shiftByScroll(scrollY)
+                        if (ms.y > playerY) continue
+                        if (!circleSegmentHit(ms, m.radius, r.start, r.end, r.width * 0.5f)) continue
+                        val t = (((ms.x - r.start.x) * abx + (ms.y - r.start.y) * aby) / ab2).coerceIn(0f, 1f)
+                        if (t < bestT) {
+                            bestT = t
+                            stop = Offset(r.start.x + abx * t, r.start.y + aby * t)
+                        }
+                    }
+                    boss?.let { b ->
+                        val bs = b.rect.shiftByScroll(scrollY)
+                        val samples = listOf(bs.center, bs.topLeft, Offset(bs.right, bs.top), Offset(bs.left, bs.bottom), Offset(bs.right, bs.bottom))
+                        for (p in samples) {
+                            if (!circleSegmentHit(p, 8f, r.start, r.end, r.width * 0.5f)) continue
+                            val t = (((p.x - r.start.x) * abx + (p.y - r.start.y) * aby) / ab2).coerceIn(0f, 1f)
+                            if (t < bestT) {
+                                bestT = t
+                                stop = Offset(r.start.x + abx * t, r.start.y + aby * t)
+                            }
+                        }
+                    }
+                    drawLine(
+                        Color(0xFFFF8A3D).copy(alpha = 0.32f * a),
+                        start = r.start,
+                        end = stop,
+                        strokeWidth = r.width
+                    )
+                    drawLine(
+                        Color(0xFFFFE2A6).copy(alpha = 0.9f * a),
+                        start = r.start,
+                        end = stop,
+                        strokeWidth = r.width * 0.35f
+                    )
+                    // start/end emphasis so direction endpoints are clear
+                    drawCircle(Color(0xFFFF7A3D).copy(alpha = 0.85f * a), r.width * 0.36f, r.start)
+                    drawCircle(Color(0xFFFFE2A6).copy(alpha = 0.95f * a), r.width * 0.24f, r.start)
+                    drawCircle(
+                        Color(0xFFFFC35A).copy(alpha = 0.8f * a),
+                        r.width * 0.75f,
+                        r.start,
+                        style = Stroke(width = max(2f, r.width * 0.12f))
+                    )
+                    drawCircle(Color(0xFFFFE2A6).copy(alpha = 0.82f * a), r.width * 0.30f, stop)
+                    drawCircle(Color(0xFFFF7A3D).copy(alpha = 0.65f * a), r.width * 0.50f, stop, style = Stroke(width = 2.2f))
                 }
 
                 // Player (chibi archer, concept-aligned)
@@ -2396,68 +2802,14 @@ private fun GameScreen() {
                 drawLine(Color(0xFFE6D0A5), Offset(c.x + r * 0.62f, c.y - r * 1.15f), Offset(c.x + r * 0.62f, c.y - r * 1.45f), 3f)
                 drawLine(Color(0xFFE6D0A5), Offset(c.x + r * 0.52f, c.y - r * 1.12f), Offset(c.x + r * 0.52f, c.y - r * 1.4f), 3f)
 
-                // Stage text (top-center)
-                val stageThemeName = when (theme.name) {
-                    "FOREST" -> "숲"
-                    "SWAMP" -> "늪"
-                    "VOLCANO" -> "화산"
-                    else -> theme.name
-                }
-                drawIntoCanvas { c ->
-                    val fill = android.graphics.Paint(uiPaint).apply { color = ui.text.toArgb() }
-                    val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
-                    val stageText = "스테이지 ${stageIndex + 1}  ${stageThemeName}"
-                    drawOutlinedText(c.nativeCanvas, stroke, fill, stageText, width * 0.5f, 200f, 40f, android.graphics.Paint.Align.CENTER)
-                }
-
-                // HUD (bottom bar)
-                drawIntoCanvas { c ->
-                    val w = weapon
-                    val themeName = when (theme.name) {
-                        "FOREST" -> "숲"
-                        "SWAMP" -> "늪"
-                        "VOLCANO" -> "화산"
-                        else -> theme.name
-                    }
-                    val weaponText = if (w == null) "무기 없음" else "${w.type.label} Lv${w.level}"
-                    val dmgText = if (w == null) "공격력 -" else "공격력 ${w.damage}"
-                    val rateText = if (w == null) {
-                        "공속 -"
-                    } else {
-                        val shotsPerSec = 1000f / w.fireRateMs.toFloat()
-                        val rateLabel = String.format("%.1f", shotsPerSec)
-                        "공속 초당 ${rateLabel}회"
-                    }
-                    val countText = if (w == null) "" else if (w.type == WeaponType.LASER) "지속 ${w.laserDurationMs}ms" else "탄환 ${w.bulletCount}"
-
-                    val panelW = width - 24f
-                    val panelH = 84f
-                    val x = 14f
-                    val y = height - panelH - 16f
-                    val centerX = width * 0.5f
-                    val textY = height - 96f
-                    val fill = android.graphics.Paint(uiPaint).apply { color = ui.text.toArgb() }
-                    val stroke = android.graphics.Paint(uiStrokePaint).apply {
-                        color = android.graphics.Color.BLACK
-                    }
-                    drawOutlinedText(
-                        c.nativeCanvas,
-                        stroke,
-                        fill,
-                        "코인 ${coins}  $weaponText  $dmgText  $countText  $rateText",
-                        centerX,
-                        textY,
-                        40f,
-                        android.graphics.Paint.Align.CENTER
-                    )
-                }
-
                 // Floating texts
                 floatingTexts.forEach { ft ->
                     drawIntoCanvas { c ->
                         val fill = android.graphics.Paint(uiPaint).apply { color = ft.color.toArgb() }
                         val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
-                    drawOutlinedText(c.nativeCanvas, stroke, fill, ft.text, ft.pos.x, ft.pos.y, 38f, android.graphics.Paint.Align.CENTER)
+                    val isAccum = ft.text.startsWith("합계 ")
+                    val size = if (isAccum) 48f else 38f
+                    drawOutlinedText(c.nativeCanvas, stroke, fill, ft.text, ft.pos.x, ft.pos.y, size, android.graphics.Paint.Align.CENTER)
                 }
             }
 
@@ -2476,6 +2828,13 @@ private fun GameScreen() {
                     val radius = 18f + t * 40f
                     val alpha = 1f - t
                     drawCircle(Color(0xFFFFC35A).copy(alpha = alpha), radius, gb.pos, style = Stroke(width = 4f))
+                }
+                splashBursts.forEach { sb ->
+                    val t = 1f - (sb.lifeMs / 220f).coerceIn(0f, 1f)
+                    val r = sb.radius * (0.55f + 0.75f * t)
+                    val a = 1f - t
+                    drawCircle(Color(0xFFFF7A3D).copy(alpha = 0.42f * a), r, sb.pos)
+                    drawCircle(Color(0xFFFFD2A6).copy(alpha = 0.95f * a), r * 0.75f, sb.pos, style = Stroke(width = 4.5f))
                 }
 
                 // Muzzle flashes
@@ -2504,6 +2863,80 @@ private fun GameScreen() {
                     val a = (p.lifeMs / 220f).coerceIn(0f, 1f)
                     drawCircle(p.color.copy(alpha = a), 4f, p.pos)
                 }
+                }
+            }
+
+            if (screenState == ScreenState.GAME) {
+                val w = weapon
+                val stageThemeName = when (stageIndex % 3) {
+                    0 -> "숲"
+                    1 -> "늪"
+                    else -> "화산"
+                }
+                val rateLabel = if (w == null) "-" else String.format("%.1f", 1000f / w.fireRateMs.toFloat())
+                val ammoLabel = if (w == null) "-" else if (w.type == WeaponType.LASER) "${w.laserDurationMs}ms" else "${w.bulletCount}"
+                val specialLabel = when {
+                    w == null -> "특수 없음"
+                    w.legendarySplash -> "명중폭발"
+                    w.legendarySuperHoming -> "슈퍼유도"
+                    w.legendaryShardLaser -> "분기레이저"
+                    else -> "특수 없음"
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 84.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .background(Color(0xCC13100D), RoundedCornerShape(16.dp))
+                            .border(1.5.dp, ui.frame.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Text("STAGE ${min(stageIndex + 1, 3)}", color = ui.accent, fontSize = 16.sp)
+                        Text(stageThemeName, color = ui.text, fontSize = 16.sp)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 10.dp, end = 10.dp, bottom = 6.dp),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = Color(0xB318120E),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .border(1.dp, ui.frame.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("코인 $coins", color = ui.accent, fontSize = 12.sp)
+                            Text(if (w == null) "무기 없음" else "${w.type.label} Lv${w.level}", color = ui.text, fontSize = 12.sp)
+                            Text(specialLabel, color = Color(0xFFFFB5E8), fontSize = 11.sp)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(if (w == null) "공격 -" else "공격 ${w.damage}", color = Color(0xFFFFD084), fontSize = 12.sp)
+                            Text("탄/지 $ammoLabel", color = Color(0xFF9DE7FF), fontSize = 12.sp)
+                            Text("공속 $rateLabel/s", color = Color(0xFF8CFFB0), fontSize = 12.sp)
+                        }
+                    }
                 }
             }
 
@@ -2681,6 +3114,17 @@ private fun GameScreen() {
                                 .clickable { manualPaused = false }
                         )
                         Text(
+                            "재시작",
+                            color = ui.text,
+                            fontSize = 24.sp,
+                            modifier = Modifier
+                                .padding(vertical = 6.dp)
+                                .clickable {
+                                    manualPaused = false
+                                    resetGame()
+                                }
+                        )
+                        Text(
                             "메인 메뉴",
                             color = ui.text,
                             fontSize = 24.sp,
@@ -2697,10 +3141,7 @@ private fun GameScreen() {
             }
 
             if (screenState == ScreenState.GAME && !running) {
-                val frame = ui.frame
-                val panel = ui.panel
                 val accent = ui.accent
-                val shape = RoundedCornerShape(18.dp)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2708,19 +3149,8 @@ private fun GameScreen() {
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                            .width(320.dp)
-                                .background(panel, shape)
-                                .border(2.dp, frame, shape)
-                                .padding(vertical = 16.dp, horizontal = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = 34.sp)
-                                Text("스테이지 ${min(stageIndex + 1, 3)}", color = ui.text, fontSize = 16.sp)
-                            }
-                        }
+                        Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = 34.sp)
+                        Text("스테이지 ${min(stageIndex + 1, 3)}", color = ui.text, fontSize = 16.sp)
                         Spacer(modifier = Modifier.height(16.dp))
                         val actionTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
                             Text(
@@ -2853,9 +3283,10 @@ private fun upgradeOptionsForChoice(weapon: WeaponState, rarity: Rarity): List<U
     } else {
         listOf(UpgradeType.PIERCE, UpgradeType.BURST)
     }
+    val hasLegendarySpecial = weapon.legendarySplash || weapon.legendarySuperHoming || weapon.legendaryShardLaser
     return if (rarity == Rarity.LEGENDARY) {
-        listOf(UpgradeType.LEGENDARY_SPECIAL) + base + specials
-    } else if (rarity >= Rarity.EPIC) {
+        if (hasLegendarySpecial) base else listOf(UpgradeType.LEGENDARY_SPECIAL) + base
+    } else if (rarity == Rarity.EPIC) {
         base + specials
     } else {
         base
@@ -2985,12 +3416,13 @@ private fun legendarySpecialLabel(weaponType: WeaponType): String {
 private fun generateUpgradeChoices(weapon: WeaponState, rng: Random): List<UpgradeChoice> {
     val chosen = mutableSetOf<UpgradeType>()
     val result = mutableListOf<UpgradeChoice>()
+    val hasLegendarySpecial = weapon.legendarySplash || weapon.legendarySuperHoming || weapon.legendaryShardLaser
     var safety = 0
     while (result.size < 3 && safety < 200) {
         safety++
         val rarity = rollRarity(rng)
         val upgrades = upgradeOptionsForChoice(weapon, rarity)
-        val pick = if (rarity == Rarity.LEGENDARY && UpgradeType.LEGENDARY_SPECIAL !in chosen) {
+        val pick = if (rarity == Rarity.LEGENDARY && !hasLegendarySpecial && UpgradeType.LEGENDARY_SPECIAL !in chosen) {
             UpgradeType.LEGENDARY_SPECIAL
         } else {
             upgrades.shuffled(rng).firstOrNull { it !in chosen } ?: continue
@@ -3171,6 +3603,21 @@ private fun circleRectHit(center: Offset, radius: Float, rect: Rect): Boolean {
     val dx = center.x - closestX
     val dy = center.y - closestY
     return dx * dx + dy * dy <= radius * radius
+}
+
+private fun circleSegmentHit(center: Offset, radius: Float, a: Offset, b: Offset, segHalfWidth: Float): Boolean {
+    val abx = b.x - a.x
+    val aby = b.y - a.y
+    val apx = center.x - a.x
+    val apy = center.y - a.y
+    val ab2 = abx * abx + aby * aby
+    val t = if (ab2 <= 0.0001f) 0f else ((apx * abx + apy * aby) / ab2).coerceIn(0f, 1f)
+    val cx = a.x + abx * t
+    val cy = a.y + aby * t
+    val dx = center.x - cx
+    val dy = center.y - cy
+    val rr = radius + segHalfWidth
+    return dx * dx + dy * dy <= rr * rr
 }
 
 private fun drawOutlinedText(
