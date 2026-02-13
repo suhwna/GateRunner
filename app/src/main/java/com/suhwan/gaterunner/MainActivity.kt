@@ -609,8 +609,9 @@ private fun GameScreen() {
             val diff = currentDifficulty.coerceIn(1, 9)
             val stride = height * 1.2f
             val gateCount = gatesPerStage
-            val laneCount = 2
-            val laneWidth = pathWidth / laneCount
+            val pathInnerMargin = pathWidth * 0.14f
+            val xMin = pathLeft + pathInnerMargin
+            val xMax = pathRight - pathInnerMargin
             val minMonstersPerBlock = (1 + (diff - 1) / 5).coerceIn(1, 3)
             val maxMonstersPerBlock = (2 + (diff - 1) / 3).coerceIn(2, 5)
             val segmentStartMonsterIndex = monsters.size
@@ -663,45 +664,44 @@ private fun GameScreen() {
                 val gateY = gateYs[i]
                 blockFractions.forEachIndexed { blockIdx, frac ->
                     val count = if (rng.nextFloat() < 0.62f) minMonstersPerBlock else maxMonstersPerBlock
-                    val usedLanes = mutableSetOf<Int>()
-                    var prevLane = rng.nextInt(laneCount)
+                    var prevX = xMin + rng.nextFloat() * (xMax - xMin)
                     repeat(count) { m ->
-                        val lane = when (stage) {
+                        var cx = when (stage) {
                             1 -> {
-                                // swamp: zigzag-ish but randomized
-                                val step = if (rng.nextBoolean()) 1 else -1
-                                val candidate = (prevLane + step + laneCount) % laneCount
-                                if (rng.nextFloat() < 0.28f) rng.nextInt(laneCount) else candidate
+                                // swamp: wider lateral drift
+                                val swing = pathWidth * (0.18f + rng.nextFloat() * 0.22f)
+                                val dir = if (rng.nextBoolean()) 1f else -1f
+                                if (rng.nextFloat() < 0.35f) {
+                                    xMin + rng.nextFloat() * (xMax - xMin)
+                                } else {
+                                    (prevX + swing * dir).coerceIn(xMin, xMax)
+                                }
                             }
                             2 -> {
-                                // volcano: prefer spread, but keep irregular
-                                val far = (prevLane + laneCount / 2 + rng.nextInt(2) - 1 + laneCount) % laneCount
-                                if (m == 0 && rng.nextFloat() < 0.55f) prevLane else far
+                                // volcano: strong spread but not fixed lanes
+                                val spread = pathWidth * (0.24f + rng.nextFloat() * 0.20f)
+                                val dir = if (m % 2 == 0) 1f else -1f
+                                (prevX + spread * dir).coerceIn(xMin, xMax)
                             }
                             else -> {
-                                // forest: avoid repeating same lane too often
-                                var candidate = rng.nextInt(laneCount)
-                                if (candidate == prevLane && laneCount > 1) {
-                                    candidate = (candidate + 1 + rng.nextInt(laneCount - 1)) % laneCount
-                                }
-                                candidate
+                                // forest: mostly random, avoids center lock pattern
+                                xMin + rng.nextFloat() * (xMax - xMin)
                             }
                         }
-                        if (count == 2 && lane in usedLanes) return@repeat
-                        usedLanes.add(lane)
-                        prevLane = lane
-                        val laneCenter = pathLeft + laneWidth * lane + laneWidth / 2f
-                        val jitter = when (stage) {
-                            1 -> (laneWidth * 0.12f) * (if (m == 0) -1 else 1)
-                            2 -> (laneWidth * 0.16f) * (if (i % 2 == 0) 1 else -1)
-                            else -> (laneWidth * 0.08f) * (rng.nextFloat() * 2f - 1f)
+                        // Keep two-monster blocks visually separated in X.
+                        if (count == 2 && abs(cx - prevX) < pathWidth * 0.22f) {
+                            cx = if (cx < (xMin + xMax) * 0.5f) {
+                                (cx + pathWidth * 0.24f).coerceAtMost(xMax)
+                            } else {
+                                (cx - pathWidth * 0.24f).coerceAtLeast(xMin)
+                            }
                         }
-                        val cx = (laneCenter + jitter).coerceIn(pathLeft + laneWidth * 0.2f, pathRight - laneWidth * 0.2f)
+                        prevX = cx
                         val fracJitter = (rng.nextFloat() * 2f - 1f) * 0.045f
                         val yJitter = (rng.nextFloat() * 2f - 1f) * (height * 0.035f)
                         val y = gateY - stride * (frac + fracJitter) - m * (height * 0.075f) + yJitter
                         // Slightly bigger enemy footprint for better readability on mobile.
-                        val baseR = laneWidth * 0.25f
+                        val baseR = pathWidth * 0.115f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
                         val forceRanged = rangedSpawned < maxRangedPerSegment && (rng.nextFloat() < rangedChance)
                         var role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
@@ -1020,7 +1020,7 @@ private fun GameScreen() {
                             w.bulletRadius * 1.15f,
                             -1,
                             false,
-                            splashRadius = if (w.legendarySplash) max(104f, w.bulletRadius * 19.2f) else 0f,
+                            splashRadius = if (w.legendarySplash) max(156f, w.bulletRadius * 28.8f) else 0f,
                             splashDamageRatio = if (w.legendarySplash) 0.55f else 0f
                         ))
                     }
@@ -1044,7 +1044,7 @@ private fun GameScreen() {
                             w.bulletRadius * 0.9f,
                             -1,
                             false,
-                            splashRadius = if (w.legendarySplash) max(96f, w.bulletRadius * 18.0f) else 0f,
+                            splashRadius = if (w.legendarySplash) max(144f, w.bulletRadius * 27.0f) else 0f,
                             splashDamageRatio = if (w.legendarySplash) 0.5f else 0f
                         ))
                     }
@@ -1550,7 +1550,8 @@ private fun GameScreen() {
                                     if (newHp <= 0) removedMonsters.add(mi) else monsters[mi] = m.copy(hp = newHp)
                                     if (b.splashRadius > 0f) {
                                         splashBursts.add(SplashBurst(ms, b.splashRadius, 220L))
-                                        val splashDamage = max(1, (b.damage * b.splashDamageRatio).toInt())
+                                        // Splash damage scales with current projectile attack damage.
+                                        val splashDamage = max(1, (b.damage * (b.splashDamageRatio + 0.25f)).toInt())
                                         for (si in monsters.indices) {
                                             if (si == mi) continue
                                             val sm = monsters[si]
@@ -1904,7 +1905,11 @@ private fun GameScreen() {
                                 convertRemainingGatesToUpgrades(gatePairs, weapon!!, Random(System.currentTimeMillis()))
                             }
                             floatingTexts.add(FloatingText(gateLabel(chosen), Offset(playerX, playerY - 40f), Color(0xFF7CFF7C), 700L))
-                            gateBursts.add(GateBurst(chosen.rect.shiftByScroll(scrollY).center, 260L))
+                            val gateCenter = chosen.rect.shiftByScroll(scrollY).center
+                            gateBursts.add(GateBurst(gateCenter, 380L))
+                            gateBursts.add(GateBurst(Offset(playerX, playerY - playerRadius * 0.6f), 320L))
+                            addParticles(gateCenter, Color(0xFFFFC35A))
+                            addParticles(Offset(playerX, playerY - playerRadius), Color(0xFFFFE2A6))
                             gatesPassed += 1
                             break
                         }
@@ -3038,13 +3043,7 @@ private fun GameScreen() {
                     val bs = b.rect.shiftByScroll(scrollY)
                     val c = bs.center
                     val br = min(bs.width, bs.height) * 0.42f
-                    // shadow + aura
-                    drawOval(
-                        color = Color.Black.copy(alpha = 0.32f),
-                        topLeft = Offset(c.x - br * 0.95f, c.y + br * 0.72f),
-                        size = androidx.compose.ui.geometry.Size(br * 1.9f, br * 0.46f)
-                    )
-                    drawCircle(theme.glow.copy(alpha = 0.18f), br * 1.25f, c)
+                    var decoCenter = c
                     val bossSprite = monsterSprites
                         .takeIf { it.isNotEmpty() && b.spriteRawIndex >= 0 }
                         ?.getOrNull(b.spriteRawIndex % monsterSprites.size)
@@ -3060,6 +3059,16 @@ private fun GameScreen() {
                         val dh = sh * scale
                         val left = c.x - dw * 0.5f
                         val top = bs.bottom - dh * 0.90f
+                        val bodyCenter = Offset(c.x, top + dh * 0.52f)
+                        val feetY = top + dh * 0.88f
+                        decoCenter = bodyCenter
+                        // Align aura/shadow to sprite body/feet to avoid floating look.
+                        drawCircle(theme.glow.copy(alpha = 0.16f), max(dw, dh) * 0.46f, bodyCenter)
+                        drawOval(
+                            color = Color.Black.copy(alpha = 0.34f),
+                            topLeft = Offset(c.x - dw * 0.34f, feetY - dh * 0.05f),
+                            size = androidx.compose.ui.geometry.Size(dw * 0.68f, dh * 0.16f)
+                        )
                         drawIntoCanvas { cc ->
                             cc.nativeCanvas.drawBitmap(
                                 bossSprite,
@@ -3069,6 +3078,12 @@ private fun GameScreen() {
                             )
                         }
                     } else {
+                        drawOval(
+                            color = Color.Black.copy(alpha = 0.32f),
+                            topLeft = Offset(c.x - br * 0.95f, c.y + br * 0.72f),
+                            size = androidx.compose.ui.geometry.Size(br * 1.9f, br * 0.46f)
+                        )
+                        drawCircle(theme.glow.copy(alpha = 0.18f), br * 1.25f, c)
                         // fallback: vector boss
                         drawCircle(theme.bossDark, br, c)
                         drawCircle(theme.bossMid, br * 0.86f, Offset(c.x, c.y - br * 0.06f))
@@ -3111,14 +3126,14 @@ private fun GameScreen() {
                     when (theme.name) {
                         "SWAMP" -> {
                             repeat(3) { i ->
-                                val x = c.x + (i - 1) * br * 0.45f
-                                drawLine(theme.glow.copy(alpha = 0.55f), Offset(x, c.y + br * 0.72f), Offset(x, c.y + br * 1.05f), 5f)
+                                val x = decoCenter.x + (i - 1) * br * 0.45f
+                                drawLine(theme.glow.copy(alpha = 0.55f), Offset(x, decoCenter.y + br * 0.72f), Offset(x, decoCenter.y + br * 1.05f), 5f)
                             }
                         }
                         "VOLCANO" -> {
                             repeat(3) { i ->
-                                val x = c.x + (i - 1) * br * 0.38f
-                                drawLine(theme.glow.copy(alpha = 0.85f), Offset(x, c.y - br * 0.95f), Offset(x, c.y - br * 1.22f), 3.5f)
+                                val x = decoCenter.x + (i - 1) * br * 0.38f
+                                drawLine(theme.glow.copy(alpha = 0.85f), Offset(x, decoCenter.y - br * 0.95f), Offset(x, decoCenter.y - br * 1.22f), 3.5f)
                             }
                         }
                     }
@@ -3419,10 +3434,18 @@ private fun GameScreen() {
 
                 // Gate burst rings
                 gateBursts.forEach { gb ->
-                    val t = 1f - (gb.lifeMs / 260f).coerceIn(0f, 1f)
-                    val radius = 18f + t * 40f
+                    val t = 1f - (gb.lifeMs / 380f).coerceIn(0f, 1f)
+                    val radius = 18f + t * 56f
                     val alpha = 1f - t
-                    drawCircle(Color(0xFFFFC35A).copy(alpha = alpha), radius, gb.pos, style = Stroke(width = 4f))
+                    drawCircle(Color(0xFFFFC35A).copy(alpha = alpha * 0.22f), radius * 0.92f, gb.pos)
+                    drawCircle(Color(0xFFFFC35A).copy(alpha = alpha), radius, gb.pos, style = Stroke(width = 4.5f))
+                    drawCircle(Color(0xFFFFE2A6).copy(alpha = alpha * 0.7f), radius * 0.64f, gb.pos, style = Stroke(width = 2.5f))
+                    repeat(8) { i ->
+                        val a = (i / 8f) * (Math.PI * 2.0).toFloat() + t * 1.4f
+                        val p1 = gb.pos + Offset(cos(a) * radius * 0.7f, sin(a) * radius * 0.7f)
+                        val p2 = gb.pos + Offset(cos(a) * radius * 1.05f, sin(a) * radius * 1.05f)
+                        drawLine(Color(0xFFFFE2A6).copy(alpha = alpha * 0.85f), p1, p2, 2.4f)
+                    }
                 }
                 splashBursts.forEach { sb ->
                     val t = 1f - (sb.lifeMs / 220f).coerceIn(0f, 1f)
@@ -3968,78 +3991,34 @@ private fun drawGateRect(
     val rect = gate.rect.shiftByScroll(scrollY)
     if (gate.used) return
     val core = when (gate.kind) {
-        GateKind.WEAPON -> weaponColor(gate.weapon!!)
-        GateKind.UPGRADE -> Color(0xFFB0562F)
+        GateKind.WEAPON -> Color(0xFF3FA9FF)
+        GateKind.UPGRADE -> Color(0xFFFF8A3D)
     }
     with(scope) {
-        // Richer gate look: frame, glow core, side pillars, plate.
-        val border = 8f
+        // Simple gate look: frame + core + ring + icon + label.
+        val border = 7f
         val frame = Color(0xFF2A1B12)
-        val panel = Color(0xFF6B3F22)
-        val innerTop = core.copy(alpha = 0.95f)
-        val innerBottom = core.copy(alpha = 0.68f)
-        val outerGlow = core.copy(alpha = 0.24f)
-
+        drawRoundRect(frame, rect.topLeft, rect.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f, 14f))
         drawRoundRect(
-            color = outerGlow,
-            topLeft = rect.topLeft - Offset(8f, 10f),
-            size = androidx.compose.ui.geometry.Size(rect.width + 16f, rect.height + 20f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f)
-        )
-        drawRoundRect(frame, rect.topLeft, rect.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f))
-        drawRoundRect(panel, rect.topLeft + Offset(4f, 4f), rect.size.copy(width = rect.size.width - 8f, height = rect.size.height - 8f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(13f, 13f))
-        drawRoundRect(
-            brush = Brush.verticalGradient(listOf(innerTop, innerBottom)),
+            brush = Brush.verticalGradient(listOf(core.copy(alpha = 0.95f), core.copy(alpha = 0.72f))),
             topLeft = rect.topLeft + Offset(border, border),
             size = rect.size.copy(width = rect.size.width - border * 2, height = rect.size.height - border * 2),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(11f, 11f)
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f)
         )
         drawRoundRect(
             color = Color.White.copy(alpha = 0.14f),
             topLeft = rect.topLeft + Offset(border + 2f, border + 2f),
             size = androidx.compose.ui.geometry.Size(rect.width - border * 2f - 4f, (rect.height - border * 2f) * 0.26f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(9f, 9f)
-        )
-
-        // side pillars
-        val pillarW = rect.width * 0.10f
-        val pillarH = rect.height * 0.78f
-        val pillarTop = rect.top + rect.height * 0.09f
-        val leftPillarX = rect.left + rect.width * 0.08f
-        val rightPillarX = rect.right - rect.width * 0.08f - pillarW
-        drawRoundRect(
-            color = Color(0xFFD2A56D),
-            topLeft = Offset(leftPillarX, pillarTop),
-            size = androidx.compose.ui.geometry.Size(pillarW, pillarH),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
         )
-        drawRoundRect(
-            color = Color(0xFFD2A56D),
-            topLeft = Offset(rightPillarX, pillarTop),
-            size = androidx.compose.ui.geometry.Size(pillarW, pillarH),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-        )
-
-        // Portal ring + glow
+        
+        // Portal ring
         val ringR = rect.height * 0.33f
         val ringCenter = Offset(rect.center.x, rect.center.y - rect.height * 0.1f)
-        drawCircle(core.copy(alpha = 0.28f), ringR * 1.25f, ringCenter)
-        drawCircle(Color(0xFFE6D0A5), ringR * 1.08f, ringCenter, style = Stroke(width = 6.5f))
+        drawCircle(core.copy(alpha = 0.26f), ringR * 1.22f, ringCenter)
+        drawCircle(Color(0xFFE6D0A5), ringR * 1.03f, ringCenter, style = Stroke(width = 6f))
         drawCircle(Color(0xFF9C6B38), ringR, ringCenter, style = Stroke(width = 4f))
-        drawCircle(core.copy(alpha = 0.72f), ringR * 0.7f, ringCenter)
-
-        // subtle rune ticks
-        repeat(6) { i ->
-            val a = (i / 6f) * (Math.PI * 2.0).toFloat()
-            val r1 = ringR * 0.9f
-            val r2 = ringR * 1.05f
-            drawLine(
-                Color(0xFFFFE2A6).copy(alpha = 0.7f),
-                start = ringCenter + Offset(cos(a) * r1, sin(a) * r1),
-                end = ringCenter + Offset(cos(a) * r2, sin(a) * r2),
-                strokeWidth = 2f
-            )
-        }
+        drawCircle(core.copy(alpha = 0.68f), ringR * 0.72f, ringCenter)
 
         // bottom emblem plate
         val plateW = rect.width * 0.62f
@@ -4066,7 +4045,7 @@ private fun drawGateRect(
                 this.style = android.graphics.Paint.Style.STROKE
                 this.strokeWidth = 6f
                 this.color = android.graphics.Color.BLACK
-            }, paint, label, rect.center.x, rect.center.y + rect.height * 0.29f, 40f, android.graphics.Paint.Align.CENTER)
+            }, paint, label, rect.center.x, rect.center.y + rect.height * 0.30f, 40f, android.graphics.Paint.Align.CENTER)
         }
         drawGateIcon(gate, rect, this)
     }
