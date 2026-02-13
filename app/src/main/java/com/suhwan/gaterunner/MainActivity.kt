@@ -415,13 +415,21 @@ private fun GameScreen() {
         val pathLeft = (width - pathWidth) / 2f
         val pathRight = pathLeft + pathWidth
         val ui = UiPalette()
-        val fsTitle = 34.sp
-        val fsSubtitle = 18.sp
+        val fsTitle = 32.sp
+        val fsSubtitle = 20.sp
         val fsBody = 16.sp
-        val fsAction = 30.sp
-        val uiGapSm = 8.dp
-        val uiGapMd = 12.dp
-        val uiGapLg = 16.dp
+        val fsAction = 26.sp
+        val fsHero = 46.sp
+        val fsPrompt = 20.sp
+        val fsCardTitle = 16.sp
+        val fsCardMeta = 14.sp
+        val fsCardButton = 16.sp
+        val fsHudLabel = 13.sp
+        val fsHudValue = 16.sp
+        val fsPanelTitle = 32.sp
+        val uiGapSm = 10.dp
+        val uiGapMd = 14.dp
+        val uiGapLg = 18.dp
 
         var weapon by remember { mutableStateOf<WeaponState?>(null) }
         var gatesPassed by remember { mutableStateOf(0) }
@@ -788,7 +796,8 @@ private fun GameScreen() {
                         }
                         val cx = (laneCenter + jitter).coerceIn(pathLeft + laneWidth * 0.2f, pathRight - laneWidth * 0.2f)
                         val y = gateY - stride * frac - m * (height * 0.06f)
-                        val baseR = laneWidth * 0.20f
+                        // Slightly bigger enemy footprint for better readability on mobile.
+                        val baseR = laneWidth * 0.25f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
                         val forceRanged = rangedSpawned < maxRangedPerSegment && (rng.nextFloat() < rangedChance)
                         var role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
@@ -854,7 +863,7 @@ private fun GameScreen() {
             val stage = stageIndex % 3
             val hpMult = if (loopCount >= 1) 3 else 1
             val bossHp = ((340 + stage * 220) * 1.5f).toInt() * hpMult
-            val bossH = height * 0.18f
+            val bossH = height * 0.22f
             // Spawn ahead so it scrolls in naturally
             val bossY = -scrollY - height * 0.2f
             val rect = Rect(pathLeft, bossY - bossH, pathRight, bossY)
@@ -2062,13 +2071,13 @@ private fun GameScreen() {
                                 drawCircle(ui.accent.copy(alpha = 0.30f), 3.5f + pulse * 2f, o2)
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("GATE RUNNER", color = ui.accent, fontSize = 44.sp)
+                                Text("GATE RUNNER", color = ui.accent, fontSize = fsHero)
                                 Spacer(modifier = Modifier.height(uiGapSm))
                                 Text("ARCADE HUNTER", color = ui.text.copy(alpha = 0.92f), fontSize = fsSubtitle)
                             }
                         }
                         Spacer(modifier = Modifier.height(uiGapLg))
-                        Text("화면 터치해서 시작", color = ui.text.copy(alpha = 0.2f + hintBlink * 0.8f), fontSize = 24.sp)
+                        Text("화면 터치해서 시작", color = ui.text.copy(alpha = 0.2f + hintBlink * 0.8f), fontSize = fsPrompt)
                     }
                 }
             }
@@ -2111,7 +2120,6 @@ private fun GameScreen() {
                                 Spacer(modifier = Modifier.height(uiGapSm))
                                 Text("보유 코인  $coins", color = ui.text, fontSize = fsSubtitle)
 //                                Spacer(modifier = Modifier.height(6.dp))
-//                                Text("해금 난이도: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = 14.sp)
                             }
                         }
                         Spacer(modifier = Modifier.height(uiGapMd))
@@ -2165,11 +2173,11 @@ private fun GameScreen() {
                                         ) { icon() }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(label, color = textColor, fontSize = 20.sp)
+                                            Text(label, color = textColor, fontSize = fsCardTitle)
                                             Text(
                                                 if (isMax) "Lv.$level  MAX" else "Lv.$level  ${cost}코인",
                                                 color = accent,
-                                                fontSize = 14.sp
+                                                fontSize = fsCardMeta
                                             )
                                         }
                                         Box(
@@ -2180,7 +2188,7 @@ private fun GameScreen() {
                                                 .border(1.5.dp, accent, RoundedCornerShape(10.dp)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(if (isMax) "완료" else "구매", color = ui.text, fontSize = 15.sp)
+                                            Text(if (isMax) "완료" else "구매", color = ui.text, fontSize = fsCardButton)
                                         }
                                     }
                                 }
@@ -2420,7 +2428,7 @@ private fun GameScreen() {
                                 currentDifficulty = selectedDifficulty.coerceIn(1, unlockedDifficulty)
                                 resetGame()
                                 screenState = ScreenState.GAME
-                            }
+                            }.padding(vertical = uiGapSm)
                         )
                         Text(
                             "뒤로",
@@ -2430,7 +2438,7 @@ private fun GameScreen() {
                                 uiClickFxMs = 160L
                                 toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 55)
                                 screenState = ScreenState.SHOP
-                            }
+                            }.padding(vertical = uiGapSm)
                         )
                     }
                 }
@@ -2715,15 +2723,15 @@ private fun GameScreen() {
                         val rawLabel = monsterSprites[rawIdx].label
                         val sw = sprite.width.toFloat()
                         val sh = sprite.height.toFloat()
-                        val targetMax = max(18f, r * 2f)
+                        val targetMax = max(22f, r * 2.35f)
                         val scale = targetMax / max(1f, max(sw, sh))
                         val dw = sw * scale
                         val dh = sh * scale
                         val left = kotlin.math.round(ms.x - dw * 0.5f)
-                        val top = kotlin.math.round(ms.y - dh * 0.72f)
+                        val top = kotlin.math.round(ms.y - dh * 0.62f)
                         drawOval(
                             color = Color.Black.copy(alpha = 0.26f),
-                            topLeft = Offset(ms.x - r * 0.72f, ms.y + r * 0.5f),
+                            topLeft = Offset(ms.x - r * 0.75f, ms.y + r * 0.34f),
                             size = androidx.compose.ui.geometry.Size(r * 1.44f, r * 0.4f)
                         )
                         drawIntoCanvas { c ->
@@ -3360,11 +3368,11 @@ private fun GameScreen() {
                     val dw = sw * scale
                     val dh = sh * scale
                     val left = kotlin.math.round(c.x - dw * 0.5f)
-                    val top = kotlin.math.round(c.y - dh * 0.68f)
+                    val top = kotlin.math.round(c.y - dh * 0.61f)
                     drawCircle(Color(0xFFFFC35A).copy(alpha = 0.14f), r * 1.8f, c)
                     drawOval(
                         color = Color(0xFF2A1B12).copy(alpha = 0.32f),
-                        topLeft = Offset(c.x - r * 0.9f, c.y + r * 0.8f),
+                        topLeft = Offset(c.x - r * 0.9f, c.y + r * 0.56f),
                         size = androidx.compose.ui.geometry.Size(r * 1.8f, r * 0.45f)
                     )
                     drawIntoCanvas { cc ->
@@ -3381,7 +3389,7 @@ private fun GameScreen() {
                 // shadow
                 drawOval(
                     color = Color(0xFF2A1B12).copy(alpha = 0.35f),
-                    topLeft = Offset(c.x - r * 0.9f, c.y + r * 0.8f),
+                    topLeft = Offset(c.x - r * 0.9f, c.y + r * 0.56f),
                     size = androidx.compose.ui.geometry.Size(r * 1.8f, r * 0.45f)
                 )
                 // body
@@ -3524,8 +3532,8 @@ private fun GameScreen() {
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(title, color = ui.muted, fontSize = 8.sp)
-                        Text(value, color = tint, fontSize = 11.sp)
+                        Text(title, color = ui.muted, fontSize = fsHudLabel)
+                        Text(value, color = tint, fontSize = fsHudValue)
                     }
                 }
 
@@ -3535,7 +3543,7 @@ private fun GameScreen() {
                         .padding(top = 96.dp),
                     contentAlignment = Alignment.TopCenter
                 ) {
-                    Text("STAGE ${min(stageIndex + 1, 3)} · $stageThemeName · 난이도 $currentDifficulty", color = ui.accent, fontSize = 18.sp)
+                    Text("STAGE ${min(stageIndex + 1, 3)} · $stageThemeName · 난이도 $currentDifficulty", color = ui.accent, fontSize = fsSubtitle)
                 }
 
                 Box(
@@ -3578,7 +3586,7 @@ private fun GameScreen() {
                                 .border(1.5.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
-                            Text("강화 선택", color = ui.accent, fontSize = 28.sp)
+                            Text("강화 선택", color = ui.accent, fontSize = fsPanelTitle)
                         }
                         upgradeChoices.forEach { choice ->
                             val base = choice.rarity.color
@@ -3668,14 +3676,14 @@ private fun GameScreen() {
                                     androidx.compose.foundation.layout.Column(
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        Text(choice.rarity.label, color = border, fontSize = 16.sp)
+                                        Text(choice.rarity.label, color = border, fontSize = fsBody)
                                         val title = if (choice.upgrade == UpgradeType.LEGENDARY_SPECIAL && weapon != null) {
                                             legendarySpecialLabel(weapon!!.type)
                                         } else {
                                             upgradeLabel(choice.upgrade)
                                         }
-                                        Text(title, color = ui.text, fontSize = 24.sp)
-                                        Text(bonusText, color = glow, fontSize = 15.sp)
+                                        Text(title, color = ui.text, fontSize = fsSubtitle)
+                                        Text(bonusText, color = glow, fontSize = fsBody)
                                     }
                                 }
                             }
@@ -3818,10 +3826,10 @@ private fun GameScreen() {
                             Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = fsTitle)
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("스테이지 ${min(stageIndex + 1, 3)} · 난이도 $currentDifficulty", color = ui.text, fontSize = 18.sp)
+                        Text("스테이지 ${min(stageIndex + 1, 3)} · 난이도 $currentDifficulty", color = ui.text, fontSize = fsSubtitle)
                         if (stageIndex >= 3) {
-                            Text("추가 보상 +${50 + currentDifficulty * 20} 코인", color = ui.accent, fontSize = 16.sp)
-                            Text("해금 난이도: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = 14.sp)
+                            Text("추가 보상 +${50 + currentDifficulty * 20} 코인", color = ui.accent, fontSize = fsBody)
+                            Text("해금 난이도: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = fsBody)
                         }
                         Spacer(modifier = Modifier.height(18.dp))
                         val actionTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
