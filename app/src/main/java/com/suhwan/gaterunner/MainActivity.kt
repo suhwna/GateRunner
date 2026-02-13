@@ -145,32 +145,6 @@ private data class GatePair(
     var right: Gate
 )
 
-private data class Monster(
-    val id: Int,
-    val pos: Offset,
-    val radius: Float,
-    val spriteRawIndex: Int,
-    val role: MonsterRole,
-    val hp: Int,
-    val ranged: Boolean,
-    val shotCooldownMs: Long,
-    val rangedShotKind: EnemyShotKind = EnemyShotKind.SPEAR,
-    val baseX: Float,
-    val zigzagPhase: Float,
-    val dashMs: Long,
-    val dashCooldownMs: Long,
-    val dodgeCooldownMs: Long
-)
-
-private data class EnemyShot(
-    val pos: Offset,
-    val vel: Offset,
-    val radius: Float,
-    val kind: EnemyShotKind
-)
-
-private enum class EnemyShotKind { SPEAR, AXE }
-private enum class MonsterRole { RUSHER, SKIRMISHER, BRUISER, THROWER_SPEAR, THROWER_AXE, CASTER, ELITE_MINI }
 
 private data class Bullet(
     val pos: Offset,
@@ -209,10 +183,6 @@ private data class PendingBurst(
     val x: Float
 )
 
-private data class Boss(
-    val rect: Rect,
-    var hp: Int
-)
 
 private enum class BossShotType { NORMAL, BOMB, SIDE_LASER }
 
@@ -595,116 +565,31 @@ private fun GameScreen() {
         }
 
         fun pickRoleForStage(stage: Int, rng: Random): MonsterRole {
-            val roll = rng.nextFloat()
-            return when (stage) {
-                0 -> when {
-                    roll < 0.70f -> MonsterRole.RUSHER
-                    roll < 0.90f -> MonsterRole.SKIRMISHER
-                    else -> MonsterRole.BRUISER
-                }
-                1 -> when {
-                    roll < 0.25f -> MonsterRole.RUSHER
-                    roll < 0.65f -> MonsterRole.SKIRMISHER
-                    else -> MonsterRole.BRUISER
-                }
-                else -> when {
-                    roll < 0.20f -> MonsterRole.RUSHER
-                    roll < 0.55f -> MonsterRole.SKIRMISHER
-                    else -> MonsterRole.BRUISER
-                }
-            }
+            return MonsterBalance.pickRoleForStage(stage, rng)
         }
 
         fun pickRangedRoleForStage(stage: Int, rng: Random): MonsterRole {
-            val roll = rng.nextFloat()
-            return when (stage) {
-                0 -> if (roll < 0.70f) MonsterRole.THROWER_SPEAR else MonsterRole.THROWER_AXE
-                1 -> if (roll < 0.55f) MonsterRole.THROWER_AXE else MonsterRole.CASTER
-                else -> if (roll < 0.40f) MonsterRole.THROWER_SPEAR else MonsterRole.CASTER
-            }
+            return MonsterBalance.pickRangedRoleForStage(stage, rng)
         }
 
         fun hpForRole(role: MonsterRole, stage: Int, hpMult: Int): Int {
-            val hp = when (role) {
-                MonsterRole.RUSHER -> 34 + stage * 20
-                MonsterRole.SKIRMISHER -> 30 + stage * 18
-                MonsterRole.BRUISER -> 62 + stage * 32
-                MonsterRole.THROWER_SPEAR -> ((42 + stage * 24) * 0.85f).toInt()
-                MonsterRole.THROWER_AXE -> ((46 + stage * 26) * 0.9f).toInt()
-                MonsterRole.CASTER -> ((40 + stage * 22) * 0.8f).toInt()
-                MonsterRole.ELITE_MINI -> (86 + stage * 42) * 2
-            }
-            return max(1, hp * hpMult)
+            return MonsterBalance.hpForRole(role, stage, hpMult)
         }
 
         fun shotKindForRole(role: MonsterRole): EnemyShotKind {
-            return when (role) {
-                MonsterRole.THROWER_AXE -> EnemyShotKind.AXE
-                else -> EnemyShotKind.SPEAR
-            }
+            return MonsterBalance.shotKindForRole(role)
         }
 
         fun isRangedRole(role: MonsterRole): Boolean {
-            return role == MonsterRole.THROWER_SPEAR || role == MonsterRole.THROWER_AXE || role == MonsterRole.CASTER
+            return MonsterBalance.isRangedRole(role)
         }
 
         fun pickMonsterRawSpriteIndex(stage: Int, role: MonsterRole, rng: Random): Int {
-            if (monsterSprites.isEmpty()) return -1
-            val byLabel = monsterSprites.mapIndexed { i, a -> i to a.label }.toMap()
-            fun exact(label: String): Int? = byLabel.entries.firstOrNull { it.value == label }?.key
-            fun byLabels(labels: List<String>): List<Int> = labels.mapNotNull { exact(it) }
-            fun pick(candidates: List<Int>): Int {
-                return if (candidates.isNotEmpty()) candidates[rng.nextInt(candidates.size)]
-                else rng.nextInt(monsterSprites.size)
-            }
+            return MonsterBalance.pickMonsterRawSpriteIndex(stage, role, rng, monsterSprites.map { it.label })
+        }
 
-            // Fixed label pools (1:1 style mapping target).
-            val s1Melee = listOf("A3", "A4", "A5")
-            val s1Spear = listOf("A2")
-            val s1Axe = listOf("B2")
-            val s1Caster = listOf("C2")
-
-            val s2Rusher = listOf("C1", "C2", "C3")
-            val s2Skirm = listOf("C4", "C5", "D2")
-            val s2Bruiser = listOf("D3", "D4", "E1")
-            val s2Spear = listOf("C6", "D1")
-            val s2Axe = listOf("D5", "E2")
-            val s2Caster = listOf("D6", "E3")
-
-            val s3Rusher = listOf("E2", "E3", "E4")
-            val s3Skirm = listOf("E5", "F1", "F2")
-            val s3Bruiser = listOf("F3", "F4", "G1")
-            val s3Spear = listOf("E7", "F5")
-            val s3Axe = listOf("F6", "G2")
-            val s3Caster = listOf("G3", "G4")
-
-            return when (stage) {
-                0 -> when (role) {
-                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s1Spear))
-                    MonsterRole.THROWER_AXE -> pick(byLabels(s1Axe.ifEmpty { s1Spear }))
-                    MonsterRole.CASTER -> pick(byLabels(s1Caster.ifEmpty { s1Spear }))
-                    MonsterRole.RUSHER, MonsterRole.SKIRMISHER, MonsterRole.BRUISER -> pick(byLabels(s1Melee))
-                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("F1", "F2", "F3")))
-                }
-                1 -> when (role) {
-                    MonsterRole.RUSHER -> pick(byLabels(s2Rusher))
-                    MonsterRole.SKIRMISHER -> pick(byLabels(s2Skirm))
-                    MonsterRole.BRUISER -> pick(byLabels(s2Bruiser))
-                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s2Spear))
-                    MonsterRole.THROWER_AXE -> pick(byLabels(s2Axe))
-                    MonsterRole.CASTER -> pick(byLabels(s2Caster))
-                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("H1", "H2", "H3")))
-                }
-                else -> when (role) {
-                    MonsterRole.RUSHER -> pick(byLabels(s3Rusher))
-                    MonsterRole.SKIRMISHER -> pick(byLabels(s3Skirm))
-                    MonsterRole.BRUISER -> pick(byLabels(s3Bruiser))
-                    MonsterRole.THROWER_SPEAR -> pick(byLabels(s3Spear))
-                    MonsterRole.THROWER_AXE -> pick(byLabels(s3Axe))
-                    MonsterRole.CASTER -> pick(byLabels(s3Caster))
-                    MonsterRole.ELITE_MINI -> pick(byLabels(listOf("I1", "I2", "I3")))
-                }
-            }
+        fun monsterSpriteIndexByLabel(label: String): Int {
+            return MonsterBalance.monsterSpriteIndexByLabel(monsterSprites.map { it.label }, label)
         }
 
         fun radiusFromRawSprite(rawIdx: Int, fallback: Float): Float {
@@ -781,9 +666,25 @@ private fun GameScreen() {
                     var prevLane = rng.nextInt(laneCount)
                     repeat(count) { m ->
                         val lane = when (stage) {
-                            1 -> (i + m + blockIdx) % laneCount // swamp: alternating lanes
-                            2 -> if (m == 0) prevLane else (laneCount - 1 - prevLane) // volcano: forced spread
-                            else -> rng.nextInt(laneCount)
+                            1 -> {
+                                // swamp: zigzag-ish but randomized
+                                val step = if (rng.nextBoolean()) 1 else -1
+                                val candidate = (prevLane + step + laneCount) % laneCount
+                                if (rng.nextFloat() < 0.28f) rng.nextInt(laneCount) else candidate
+                            }
+                            2 -> {
+                                // volcano: prefer spread, but keep irregular
+                                val far = (prevLane + laneCount / 2 + rng.nextInt(2) - 1 + laneCount) % laneCount
+                                if (m == 0 && rng.nextFloat() < 0.55f) prevLane else far
+                            }
+                            else -> {
+                                // forest: avoid repeating same lane too often
+                                var candidate = rng.nextInt(laneCount)
+                                if (candidate == prevLane && laneCount > 1) {
+                                    candidate = (candidate + 1 + rng.nextInt(laneCount - 1)) % laneCount
+                                }
+                                candidate
+                            }
                         }
                         if (count == 2 && lane in usedLanes) return@repeat
                         usedLanes.add(lane)
@@ -795,7 +696,9 @@ private fun GameScreen() {
                             else -> (laneWidth * 0.08f) * (rng.nextFloat() * 2f - 1f)
                         }
                         val cx = (laneCenter + jitter).coerceIn(pathLeft + laneWidth * 0.2f, pathRight - laneWidth * 0.2f)
-                        val y = gateY - stride * frac - m * (height * 0.06f)
+                        val fracJitter = (rng.nextFloat() * 2f - 1f) * 0.045f
+                        val yJitter = (rng.nextFloat() * 2f - 1f) * (height * 0.035f)
+                        val y = gateY - stride * (frac + fracJitter) - m * (height * 0.075f) + yJitter
                         // Slightly bigger enemy footprint for better readability on mobile.
                         val baseR = laneWidth * 0.25f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
@@ -867,7 +770,11 @@ private fun GameScreen() {
             // Spawn ahead so it scrolls in naturally
             val bossY = -scrollY - height * 0.2f
             val rect = Rect(pathLeft, bossY - bossH, pathRight, bossY)
-            boss = Boss(rect, hp = bossHp)
+            val bossLabel = MonsterBalance.bossLabelForStage(stage)
+            val bossSpriteRaw = monsterSpriteIndexByLabel(bossLabel)
+                .takeIf { it >= 0 }
+                ?: pickMonsterRawSpriteIndex(stage, MonsterRole.ELITE_MINI, Random.Default)
+            boss = Boss(rect, hp = bossHp, spriteRawIndex = bossSpriteRaw)
         }
 
         fun resetGame() {
@@ -1465,8 +1372,16 @@ private fun GameScreen() {
                                     else -> 9.0f
                                 } * (1f + (diff - 1) * 0.08f)
                                 val kind = m.rangedShotKind
-                                val speedShot = (if (kind == EnemyShotKind.SPEAR) baseSpeed * 1.22f else baseSpeed * 0.86f) * 2f
-                                val radius = if (kind == EnemyShotKind.SPEAR) 9f else 16f
+                                val speedShot = when (kind) {
+                                    EnemyShotKind.SPEAR -> baseSpeed * 1.22f
+                                    EnemyShotKind.AXE -> baseSpeed * 0.86f
+                                    EnemyShotKind.MAGIC_BALL -> baseSpeed * 0.98f
+                                } * 2f
+                                val radius = when (kind) {
+                                    EnemyShotKind.SPEAR -> 9f
+                                    EnemyShotKind.AXE -> 16f
+                                    EnemyShotKind.MAGIC_BALL -> 12.5f
+                                }
                                 if ((m.role == MonsterRole.CASTER && diff >= 4) || (m.role == MonsterRole.ELITE_MINI && diff >= 9)) {
                                     val offsets = if (diff >= 7) listOf(-12f, 0f, 12f) else listOf(-10f, 10f)
                                     offsets.forEach { ox ->
@@ -2919,6 +2834,13 @@ private fun GameScreen() {
                                     style = Stroke(width = max(1.2f, r * 0.1f))
                                 )
                             }
+                            EnemyShotKind.MAGIC_BALL -> {
+                                val orb = Offset(ms.x + r * 0.48f, ms.y - r * 0.34f)
+                                drawCircle(Color(0xFF3F2B67), r * 0.28f, orb)
+                                drawCircle(Color(0xFFA874FF).copy(alpha = 0.92f), r * 0.2f, orb)
+                                drawCircle(Color(0xFFDCC3FF).copy(alpha = 0.9f), r * 0.09f, orb + Offset(-r * 0.04f, -r * 0.05f))
+                                drawCircle(Color(0xFFA874FF).copy(alpha = 0.35f), r * 0.36f, orb)
+                            }
                         }
                     } else {
                         drawLine(monsterBase, Offset(ms.x - r * 0.65f, ms.y + r * 0.15f), Offset(ms.x + r * 0.65f, ms.y - r * 0.15f), 3.5f)
@@ -3093,6 +3015,20 @@ private fun GameScreen() {
                                 style = Stroke(width = max(1.5f, r * 0.14f))
                             )
                         }
+                        EnemyShotKind.MAGIC_BALL -> {
+                            val core = Color(0xFFD8C2FF)
+                            val shell = Color(0xFFA874FF)
+                            val aura = Color(0xFF7E4FE0)
+                            drawCircle(aura.copy(alpha = 0.35f), r * 1.55f, s.pos)
+                            drawCircle(shell.copy(alpha = 0.9f), r, s.pos)
+                            drawCircle(core, r * 0.55f, s.pos + Offset(-r * 0.08f, -r * 0.1f))
+                            repeat(4) { i ->
+                                val ang = (i / 4f) * (Math.PI * 2.0).toFloat()
+                                val p1 = s.pos + Offset(cos(ang) * r * 0.55f, sin(ang) * r * 0.55f)
+                                val p2 = s.pos + Offset(cos(ang + 0.6f) * r * 1.0f, sin(ang + 0.6f) * r * 1.0f)
+                                drawLine(Color(0xFFE7D8FF).copy(alpha = 0.8f), p1, p2, max(1.4f, r * 0.12f))
+                            }
+                        }
                     }
                 }
                 // Boss wall (forest gate)
@@ -3107,46 +3043,68 @@ private fun GameScreen() {
                         size = androidx.compose.ui.geometry.Size(br * 1.9f, br * 0.46f)
                     )
                     drawCircle(theme.glow.copy(alpha = 0.18f), br * 1.25f, c)
-                    // body/head (monster-like)
-                    drawCircle(theme.bossDark, br, c)
-                    drawCircle(theme.bossMid, br * 0.86f, Offset(c.x, c.y - br * 0.06f))
-                    drawCircle(theme.bossLight.copy(alpha = 0.26f), br * 0.40f, Offset(c.x - br * 0.28f, c.y - br * 0.25f))
-                    // horns
-                    drawPath(
-                        path = Path().apply {
-                            moveTo(c.x - br * 0.52f, c.y - br * 0.66f)
-                            lineTo(c.x - br * 1.05f, c.y - br * 1.02f)
-                            lineTo(c.x - br * 0.58f, c.y - br * 0.22f)
-                            close()
-                        },
-                        color = theme.bossDark
-                    )
-                    drawPath(
-                        path = Path().apply {
-                            moveTo(c.x + br * 0.52f, c.y - br * 0.66f)
-                            lineTo(c.x + br * 1.05f, c.y - br * 1.02f)
-                            lineTo(c.x + br * 0.58f, c.y - br * 0.22f)
-                            close()
-                        },
-                        color = theme.bossDark
-                    )
-                    // eyes + mouth
-                    val eyeY = c.y - br * 0.10f
-                    drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x - br * 0.30f, eyeY))
-                    drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x + br * 0.30f, eyeY))
-                    drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x - br * 0.27f, eyeY - br * 0.04f))
-                    drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x + br * 0.27f, eyeY - br * 0.04f))
-                    drawLine(
-                        Color(0xFF2A1B12),
-                        Offset(c.x - br * 0.34f, c.y + br * 0.30f),
-                        Offset(c.x + br * 0.34f, c.y + br * 0.30f),
-                        br * 0.10f
-                    )
-                    drawRect(
-                        Color(0xFFFFE2A6),
-                        topLeft = Offset(c.x - br * 0.20f, c.y + br * 0.25f),
-                        size = androidx.compose.ui.geometry.Size(br * 0.40f, br * 0.10f)
-                    )
+                    val bossSprite = monsterSprites
+                        .takeIf { it.isNotEmpty() && b.spriteRawIndex >= 0 }
+                        ?.getOrNull(b.spriteRawIndex % monsterSprites.size)
+                        ?.bitmap
+                    if (bossSprite != null) {
+                        val sw = bossSprite.width.toFloat()
+                        val sh = bossSprite.height.toFloat()
+                        val targetW = bs.width * 0.94f
+                        val targetH = bs.height * 1.08f
+                        val scale = min(targetW / max(1f, sw), targetH / max(1f, sh))
+                        val dw = sw * scale
+                        val dh = sh * scale
+                        val left = c.x - dw * 0.5f
+                        val top = bs.bottom - dh * 0.90f
+                        drawIntoCanvas { cc ->
+                            cc.nativeCanvas.drawBitmap(
+                                bossSprite,
+                                null,
+                                android.graphics.RectF(left, top, left + dw, top + dh),
+                                spritePaint
+                            )
+                        }
+                    } else {
+                        // fallback: vector boss
+                        drawCircle(theme.bossDark, br, c)
+                        drawCircle(theme.bossMid, br * 0.86f, Offset(c.x, c.y - br * 0.06f))
+                        drawCircle(theme.bossLight.copy(alpha = 0.26f), br * 0.40f, Offset(c.x - br * 0.28f, c.y - br * 0.25f))
+                        drawPath(
+                            path = Path().apply {
+                                moveTo(c.x - br * 0.52f, c.y - br * 0.66f)
+                                lineTo(c.x - br * 1.05f, c.y - br * 1.02f)
+                                lineTo(c.x - br * 0.58f, c.y - br * 0.22f)
+                                close()
+                            },
+                            color = theme.bossDark
+                        )
+                        drawPath(
+                            path = Path().apply {
+                                moveTo(c.x + br * 0.52f, c.y - br * 0.66f)
+                                lineTo(c.x + br * 1.05f, c.y - br * 1.02f)
+                                lineTo(c.x + br * 0.58f, c.y - br * 0.22f)
+                                close()
+                            },
+                            color = theme.bossDark
+                        )
+                        val eyeY = c.y - br * 0.10f
+                        drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x - br * 0.30f, eyeY))
+                        drawCircle(Color(0xFFFF3D3D), br * 0.12f, Offset(c.x + br * 0.30f, eyeY))
+                        drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x - br * 0.27f, eyeY - br * 0.04f))
+                        drawCircle(Color(0xFFFFD0D0), br * 0.05f, Offset(c.x + br * 0.27f, eyeY - br * 0.04f))
+                        drawLine(
+                            Color(0xFF2A1B12),
+                            Offset(c.x - br * 0.34f, c.y + br * 0.30f),
+                            Offset(c.x + br * 0.34f, c.y + br * 0.30f),
+                            br * 0.10f
+                        )
+                        drawRect(
+                            Color(0xFFFFE2A6),
+                            topLeft = Offset(c.x - br * 0.20f, c.y + br * 0.25f),
+                            size = androidx.compose.ui.geometry.Size(br * 0.40f, br * 0.10f)
+                        )
+                    }
                     when (theme.name) {
                         "SWAMP" -> {
                             repeat(3) { i ->
@@ -4005,26 +3963,80 @@ private fun drawGateRect(
 ) {
     val rect = gate.rect.shiftByScroll(scrollY)
     if (gate.used) return
-    val color = when (gate.kind) {
+    val core = when (gate.kind) {
         GateKind.WEAPON -> weaponColor(gate.weapon!!)
         GateKind.UPGRADE -> Color(0xFFB0562F)
     }
     with(scope) {
-        // Gate frame + inner fill (arcade, concept style)
-        val border = 7f
+        // Richer gate look: frame, glow core, side pillars, plate.
+        val border = 8f
         val frame = Color(0xFF2A1B12)
-        val inner = color
-        val panel = Color(0xFF7A4B24)
-        drawRoundRect(frame, rect.topLeft, rect.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f, 14f))
-        drawRoundRect(panel, rect.topLeft + Offset(4f, 4f), rect.size.copy(width = rect.size.width - 8f, height = rect.size.height - 8f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f))
-        drawRoundRect(inner, rect.topLeft + Offset(border, border), rect.size.copy(width = rect.size.width - border * 2, height = rect.size.height - border * 2), cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f))
+        val panel = Color(0xFF6B3F22)
+        val innerTop = core.copy(alpha = 0.95f)
+        val innerBottom = core.copy(alpha = 0.68f)
+        val outerGlow = core.copy(alpha = 0.24f)
+
+        drawRoundRect(
+            color = outerGlow,
+            topLeft = rect.topLeft - Offset(8f, 10f),
+            size = androidx.compose.ui.geometry.Size(rect.width + 16f, rect.height + 20f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f)
+        )
+        drawRoundRect(frame, rect.topLeft, rect.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f))
+        drawRoundRect(panel, rect.topLeft + Offset(4f, 4f), rect.size.copy(width = rect.size.width - 8f, height = rect.size.height - 8f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(13f, 13f))
+        drawRoundRect(
+            brush = Brush.verticalGradient(listOf(innerTop, innerBottom)),
+            topLeft = rect.topLeft + Offset(border, border),
+            size = rect.size.copy(width = rect.size.width - border * 2, height = rect.size.height - border * 2),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(11f, 11f)
+        )
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.14f),
+            topLeft = rect.topLeft + Offset(border + 2f, border + 2f),
+            size = androidx.compose.ui.geometry.Size(rect.width - border * 2f - 4f, (rect.height - border * 2f) * 0.26f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(9f, 9f)
+        )
+
+        // side pillars
+        val pillarW = rect.width * 0.10f
+        val pillarH = rect.height * 0.78f
+        val pillarTop = rect.top + rect.height * 0.09f
+        val leftPillarX = rect.left + rect.width * 0.08f
+        val rightPillarX = rect.right - rect.width * 0.08f - pillarW
+        drawRoundRect(
+            color = Color(0xFFD2A56D),
+            topLeft = Offset(leftPillarX, pillarTop),
+            size = androidx.compose.ui.geometry.Size(pillarW, pillarH),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+        )
+        drawRoundRect(
+            color = Color(0xFFD2A56D),
+            topLeft = Offset(rightPillarX, pillarTop),
+            size = androidx.compose.ui.geometry.Size(pillarW, pillarH),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
+        )
+
         // Portal ring + glow
-        val ringR = rect.height * 0.34f
+        val ringR = rect.height * 0.33f
         val ringCenter = Offset(rect.center.x, rect.center.y - rect.height * 0.1f)
-        drawCircle(inner.copy(alpha = 0.25f), ringR * 1.25f, ringCenter)
-        drawCircle(Color(0xFFE6D0A5), ringR * 1.05f, ringCenter, style = Stroke(width = 6f))
+        drawCircle(core.copy(alpha = 0.28f), ringR * 1.25f, ringCenter)
+        drawCircle(Color(0xFFE6D0A5), ringR * 1.08f, ringCenter, style = Stroke(width = 6.5f))
         drawCircle(Color(0xFF9C6B38), ringR, ringCenter, style = Stroke(width = 4f))
-        drawCircle(inner.copy(alpha = 0.65f), ringR * 0.7f, ringCenter)
+        drawCircle(core.copy(alpha = 0.72f), ringR * 0.7f, ringCenter)
+
+        // subtle rune ticks
+        repeat(6) { i ->
+            val a = (i / 6f) * (Math.PI * 2.0).toFloat()
+            val r1 = ringR * 0.9f
+            val r2 = ringR * 1.05f
+            drawLine(
+                Color(0xFFFFE2A6).copy(alpha = 0.7f),
+                start = ringCenter + Offset(cos(a) * r1, sin(a) * r1),
+                end = ringCenter + Offset(cos(a) * r2, sin(a) * r2),
+                strokeWidth = 2f
+            )
+        }
+
         // bottom emblem plate
         val plateW = rect.width * 0.62f
         val plateH = rect.height * 0.18f
@@ -4042,15 +4054,15 @@ private fun drawGateRect(
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
         )
         drawIntoCanvas { c ->
-                    val label = when (gate.kind) {
-                        GateKind.WEAPON -> weaponLabel(gate.weapon!!)
-                        GateKind.UPGRADE -> upgradeLabel(gate.upgrade!!)
-                    }
+            val label = when (gate.kind) {
+                GateKind.WEAPON -> weaponLabel(gate.weapon!!)
+                GateKind.UPGRADE -> upgradeLabel(gate.upgrade!!)
+            }
             drawOutlinedText(c.nativeCanvas, android.graphics.Paint(paint).apply {
                 this.style = android.graphics.Paint.Style.STROKE
                 this.strokeWidth = 6f
                 this.color = android.graphics.Color.BLACK
-            }, paint, label, rect.center.x, rect.center.y + rect.height * 0.28f, 38f, android.graphics.Paint.Align.CENTER)
+            }, paint, label, rect.center.x, rect.center.y + rect.height * 0.29f, 40f, android.graphics.Paint.Align.CENTER)
         }
         drawGateIcon(gate, rect, this)
     }
@@ -4182,7 +4194,7 @@ private fun applyUpgradeChoice(current: WeaponState?, choice: UpgradeChoice): We
 private fun drawGateIcon(gate: Gate, rect: Rect, scope: androidx.compose.ui.graphics.drawscope.DrawScope) {
     val iconY = rect.center.y - rect.height * 0.12f
     val iconX = rect.center.x
-    val size = rect.height * 0.36f
+    val size = rect.height * 0.40f
     val stroke = 5f
     with(scope) {
         when (gate.kind) {
