@@ -489,6 +489,7 @@ private fun GameScreen() {
             android.graphics.Paint().apply {
                 isFilterBitmap = false
                 isAntiAlias = false
+                isDither = false
             }
         }
         val uiPaint = remember(typeface) {
@@ -2638,8 +2639,9 @@ private fun GameScreen() {
                         val rawLabel = monsterSprites[rawIdx].label
                         val sw = sprite.width.toFloat()
                         val sh = sprite.height.toFloat()
-                        val targetMax = max(22f, r * 2.35f)
-                        val scale = targetMax / max(1f, max(sw, sh))
+                        val targetMax = max(20f, r * 2.15f)
+                        val rawScale = targetMax / max(1f, max(sw, sh))
+                        val scale = snappedPixelScale(rawScale.coerceAtMost(2.4f))
                         val dw = sw * scale
                         val dh = sh * scale
                         val left = kotlin.math.round(ms.x - dw * 0.5f)
@@ -3052,7 +3054,8 @@ private fun GameScreen() {
                         val sh = bossSprite.height.toFloat()
                         val targetW = bs.width * 0.94f
                         val targetH = bs.height * 1.08f
-                        val scale = min(targetW / max(1f, sw), targetH / max(1f, sh))
+                        val rawScale = min(targetW / max(1f, sw), targetH / max(1f, sh))
+                        val scale = snappedPixelScale(rawScale.coerceAtMost(2.8f))
                         val dw = sw * scale
                         val dh = sh * scale
                         val left = c.x - dw * 0.5f
@@ -3322,7 +3325,8 @@ private fun GameScreen() {
                     val sw = playerSprite.width.toFloat()
                     val sh = playerSprite.height.toFloat()
                     val targetMax = (r * 2.35f).coerceAtLeast(24f)
-                    val scale = targetMax / max(1f, max(sw, sh))
+                    val rawScale = targetMax / max(1f, max(sw, sh))
+                    val scale = snappedPixelScale(rawScale.coerceAtMost(2.8f))
                     val dw = sw * scale
                     val dh = sh * scale
                     val left = kotlin.math.round(c.x - dw * 0.5f)
@@ -4762,4 +4766,10 @@ private fun rowToLetters(row: Int): String {
         n = (n / 26) - 1
     } while (n >= 0)
     return out.reverse().toString()
+}
+
+private fun snappedPixelScale(scale: Float): Float {
+    // Pixel-art upscale snap: 0.25 step to reduce shimmering/blur-like perception.
+    val s = scale.coerceAtLeast(1f)
+    return (kotlin.math.floor(s * 4f) / 4f).coerceAtLeast(1f)
 }
