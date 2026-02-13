@@ -30,6 +30,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.zIndex
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -310,7 +315,7 @@ private data class BgSkull(val pos: Offset, val size: Float)
 private data class BgLavaPillar(val pos: Offset, val size: Float, val height: Float)
 private data class MonsterSpriteAsset(val bitmap: Bitmap, val label: String)
 
-private enum class ScreenState { MENU, SHOP, GAME }
+private enum class ScreenState { MENU, SHOP, DIFFICULTY, GAME }
 
 private enum class SegmentType { NORMAL, BOSS }
 
@@ -410,6 +415,13 @@ private fun GameScreen() {
         val pathLeft = (width - pathWidth) / 2f
         val pathRight = pathLeft + pathWidth
         val ui = UiPalette()
+        val fsTitle = 34.sp
+        val fsSubtitle = 18.sp
+        val fsBody = 16.sp
+        val fsAction = 30.sp
+        val uiGapSm = 8.dp
+        val uiGapMd = 12.dp
+        val uiGapLg = 16.dp
 
         var weapon by remember { mutableStateOf<WeaponState?>(null) }
         var gatesPassed by remember { mutableStateOf(0) }
@@ -468,6 +480,10 @@ private fun GameScreen() {
         var shopRangeLv by remember { mutableStateOf(0) }
         var shopMsg by remember { mutableStateOf("") }
         var shopMsgMs by remember { mutableStateOf(0L) }
+        var selectedDifficulty by remember { mutableStateOf(1) }
+        var unlockedDifficulty by remember { mutableStateOf(9) }
+        var currentDifficulty by remember { mutableStateOf(1) }
+        var uiClickFxMs by remember { mutableStateOf(0L) }
         val bgTrees = remember { mutableStateListOf<BgTree>() }
         val bgBushes = remember { mutableStateListOf<BgBush>() }
         val bgAnimals = remember { mutableStateListOf<BgAnimal>() }
@@ -489,6 +505,8 @@ private fun GameScreen() {
         val prefs = remember { context.getSharedPreferences("gaterunner_prefs", android.content.Context.MODE_PRIVATE) }
         val typeface = remember { ResourcesCompat.getFont(context, R.font.galmuri9) }
         val monsterSprites = remember(context) { extractMonsterSprites(context) }
+        val rogueSprites = remember(context) { extractRogueSprites(context) }
+        val playerSpriteLabel = "A3"
         val spritePaint = remember {
             android.graphics.Paint().apply {
                 isFilterBitmap = false
@@ -532,9 +550,15 @@ private fun GameScreen() {
             shopPierceLv = prefs.getInt("shop_pierce", 0)
             shopBurstLv = prefs.getInt("shop_burst", 0)
             shopRangeLv = prefs.getInt("shop_range", 0)
+            unlockedDifficulty = 9
+            selectedDifficulty = prefs.getInt("difficulty_selected", 1).coerceIn(1, unlockedDifficulty)
+            currentDifficulty = selectedDifficulty
         }
 
-        LaunchedEffect(coins, shopDmgLv, shopRateLv, shopCountLv, shopPierceLv, shopBurstLv, shopRangeLv) {
+        LaunchedEffect(
+            coins, shopDmgLv, shopRateLv, shopCountLv, shopPierceLv, shopBurstLv, shopRangeLv,
+            unlockedDifficulty, selectedDifficulty
+        ) {
             prefs.edit()
                 .putInt("coins", coins)
                 .putInt("shop_dmg", shopDmgLv)
@@ -543,7 +567,16 @@ private fun GameScreen() {
                 .putInt("shop_pierce", shopPierceLv)
                 .putInt("shop_burst", shopBurstLv)
                 .putInt("shop_range", shopRangeLv)
+                .putInt("difficulty_unlocked", unlockedDifficulty.coerceIn(1, 9))
+                .putInt("difficulty_selected", selectedDifficulty.coerceIn(1, 9))
                 .apply()
+        }
+
+        LaunchedEffect(Unit) {
+            while (true) {
+                if (uiClickFxMs > 0L) uiClickFxMs = max(0L, uiClickFxMs - 16L)
+                delay(16L)
+            }
         }
 
         fun currentSegments(): List<Segment> {
@@ -679,23 +712,24 @@ private fun GameScreen() {
         fun spawnNormalSegmentContent(rng: Random) {
             val stage = stageIndex % 3
             val hpMult = if (loopCount >= 1) 3 else 1
+            val diff = currentDifficulty.coerceIn(1, 9)
             val stride = height * 1.2f
             val gateCount = gatesPerStage
             val laneCount = 2
             val laneWidth = pathWidth / laneCount
-            val minMonstersPerBlock = 1
-            val maxMonstersPerBlock = 2
+            val minMonstersPerBlock = (1 + (diff - 1) / 5).coerceIn(1, 3)
+            val maxMonstersPerBlock = (2 + (diff - 1) / 3).coerceIn(2, 5)
             val segmentStartMonsterIndex = monsters.size
             val minRangedPerSegment = when (stage) {
                 0 -> 2
                 1 -> 4
                 else -> 6
-            }
+            } + (diff - 1) / 2
             val maxRangedPerSegment = when (stage) {
                 0 -> 3
                 1 -> 6
                 else -> 9
-            }
+            } + (diff - 1)
             var rangedSpawned = 0
 
             val gateYs = ArrayList<Float>(gateCount)
@@ -726,7 +760,11 @@ private fun GameScreen() {
             }
 
             // Spawn monsters between gates with fixed interval fractions (prevents empty gaps).
-            val blockFractions = floatArrayOf(0.34f, 0.70f)
+            val blockFractions = when {
+                diff >= 7 -> floatArrayOf(0.26f, 0.50f, 0.74f, 0.88f)
+                diff >= 4 -> floatArrayOf(0.30f, 0.56f, 0.80f)
+                else -> floatArrayOf(0.34f, 0.70f)
+            }
             for (i in gateYs.indices) {
                 val gateY = gateYs[i]
                 blockFractions.forEachIndexed { blockIdx, frac ->
@@ -753,8 +791,9 @@ private fun GameScreen() {
                         val baseR = laneWidth * 0.20f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
                         val forceRanged = rangedSpawned < maxRangedPerSegment && (rng.nextFloat() < rangedChance)
-                        val role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
-                        val isRanged = isRangedRole(role)
+                        var role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
+                        if (diff >= 8 && rng.nextFloat() < 0.12f) role = MonsterRole.ELITE_MINI
+                        val isRanged = isRangedRole(role) || (role == MonsterRole.ELITE_MINI && diff >= 9)
                         val spriteRaw = pickMonsterRawSpriteIndex(stage, role, rng)
                         val r = radiusFromRawSprite(spriteRaw, baseR)
                         val hpValue = hpForRole(role, stage, hpMult)
@@ -773,7 +812,7 @@ private fun GameScreen() {
                                     MonsterRole.THROWER_SPEAR -> (820L + rng.nextInt(580) - stage * 100L).coerceAtLeast(360L)
                                     else -> (900L + rng.nextInt(800) - stage * 120L).coerceAtLeast(420L)
                                 },
-                                rangedShotKind = shotKindForRole(role),
+                                rangedShotKind = if (role == MonsterRole.ELITE_MINI) EnemyShotKind.AXE else shotKindForRole(role),
                                 baseX = cx,
                                 zigzagPhase = rng.nextFloat() * 6.28f,
                                 dashMs = 0L,
@@ -1157,7 +1196,8 @@ private fun GameScreen() {
                             shopMsg = ""
                         }
                     }
-                    val speed = 5.2f + stageIndex * 1.2f
+                    val diff = currentDifficulty.coerceIn(1, 9)
+                    val speed = (5.2f + stageIndex * 1.2f) * (1f + (diff - 1) * 0.08f)
                     val bossScreen = boss?.rect?.shiftByScroll(scrollY)
                     val stopLine = playerY - playerRadius - 20f
                     // Always auto-scroll; boss is an obstacle wall.
@@ -1182,13 +1222,14 @@ private fun GameScreen() {
                     val currentBossForShots = boss
                     if (currentBossForShots != null) {
                         val stage = stageIndex % 3
-                        val volleyInterval = if (stage == 0) 320L else if (stage == 1) 300L else 280L
-                        val shotSpeed = 18.75f + stage * 2.25f
-                        val bombSpeed = 8.0f + stage * 1.0f
+                        val diff = currentDifficulty.coerceIn(1, 9)
+                        val volleyInterval = (if (stage == 0) 320L else if (stage == 1) 300L else 280L) - (diff - 1) * 10L
+                        val shotSpeed = (18.75f + stage * 2.25f) * (1f + (diff - 1) * 0.06f)
+                        val bombSpeed = (8.0f + stage * 1.0f) * (1f + (diff - 1) * 0.05f)
                         val spawnY = currentBossForShots.rect.shiftByScroll(scrollY).bottom - 10f
                         val centerX = (pathLeft + pathRight) * 0.5f
-                        val warnDelay = 300L
-                        val laneWarnDelay = 720L
+                        val warnDelay = (300L - (diff - 1) * 10L).coerceAtLeast(180L)
+                        val laneWarnDelay = (720L - (diff - 1) * 20L).coerceAtLeast(420L)
 
                         if (bossPatternCooldownMs > 0L) bossPatternCooldownMs -= dt
                         if (bossVolleyRemaining > 0) {
@@ -1222,11 +1263,12 @@ private fun GameScreen() {
                         val patternBusy = bossVolleyRemaining > 0 || bossTelegraphs.isNotEmpty() || bossLaneLasers.isNotEmpty()
                         if (bossPatternCooldownMs <= 0L && !patternBusy) {
                             // Stage-specific pattern sets.
-                            val patternCount = when (stage) {
+                            val basePatternCount = when (stage) {
                                 0 -> 1 // fan only
                                 1 -> 2 // fan + side straight
                                 else -> 3 // fan + bomb + side straight
                             }
+                            val patternCount = if (diff >= 7) basePatternCount + 1 else basePatternCount
                             val idx = bossPatternIndex % patternCount
                             when (idx) {
                                 0 -> { // 3x burst fan
@@ -1236,7 +1278,8 @@ private fun GameScreen() {
                                         0 -> 980L
                                         1 -> 900L
                                         else -> 820L
-                                    }
+                                    } - (diff - 1) * 35L
+                                    if (bossPatternCooldownMs < 360L) bossPatternCooldownMs = 360L
                                 }
                                 1 -> { // stage2: one-side lane laser / stage3: central bomb
                                     if (stage == 1) {
@@ -1254,13 +1297,13 @@ private fun GameScreen() {
                                                 BossShotType.SIDE_LASER
                                             )
                                         )
-                                        bossPatternCooldownMs = 850L
+                                        bossPatternCooldownMs = (850L - (diff - 1) * 30L).coerceAtLeast(360L)
                                     } else {
                                         // Stage 3: central bomb
                                         val start = Offset(centerX, spawnY)
                                         val end = Offset(centerX, height * 1.1f)
                                         bossTelegraphs.add(BossTelegraph(start, end, warnDelay, Offset(0f, bombSpeed), 100f, BossShotType.BOMB))
-                                        bossPatternCooldownMs = 780L
+                                        bossPatternCooldownMs = (780L - (diff - 1) * 30L).coerceAtLeast(340L)
                                     }
                                 }
                                 2 -> { // stage3: one-side lane laser
@@ -1277,7 +1320,40 @@ private fun GameScreen() {
                                             BossShotType.SIDE_LASER
                                         )
                                     )
-                                    bossPatternCooldownMs = 780L
+                                    bossPatternCooldownMs = (780L - (diff - 1) * 30L).coerceAtLeast(340L)
+                                }
+                                3 -> { // high difficulty: fan + central bomb mix
+                                    val angles = listOf(-10f, 10f)
+                                    val aimX = playerX
+                                    val aimY = playerY
+                                    val dx = aimX - centerX
+                                    val dy = aimY - spawnY
+                                    val baseLen = max(1f, hypot(dx, dy))
+                                    val dirX = dx / baseLen
+                                    val dirY = dy / baseLen
+                                    val perpX = -dirY
+                                    val perpY = dirX
+                                    angles.forEach { a ->
+                                        val rad = Math.toRadians(a.toDouble()).toFloat()
+                                        val vx = (dirX * cos(rad) + perpX * sin(rad)) * shotSpeed
+                                        val vy = (dirY * cos(rad) + perpY * sin(rad)) * shotSpeed
+                                        val start = Offset(centerX, spawnY)
+                                        val len = max(1f, hypot(vx, vy))
+                                        val dir = Offset(vx / len, vy / len)
+                                        val end = start + dir * (height * 1.1f)
+                                        bossTelegraphs.add(BossTelegraph(start, end, warnDelay, Offset(vx, vy), 55f, BossShotType.NORMAL))
+                                    }
+                                    bossTelegraphs.add(
+                                        BossTelegraph(
+                                            Offset(centerX, spawnY),
+                                            Offset(centerX, height * 1.1f),
+                                            warnDelay,
+                                            Offset(0f, bombSpeed),
+                                            100f,
+                                            BossShotType.BOMB
+                                        )
+                                    )
+                                    bossPatternCooldownMs = (760L - (diff - 1) * 25L).coerceAtLeast(320L)
                                 }
                             }
                             bossPatternIndex += 1
@@ -1346,22 +1422,24 @@ private fun GameScreen() {
                         var y = m.pos.y
                         var shotCd = m.shotCooldownMs
 
-                        if (stage >= 1) {
+                        val dashEnabled = m.role == MonsterRole.BRUISER || m.role == MonsterRole.ELITE_MINI || diff >= 5
+                        if (dashEnabled && stage >= 1) {
                             if (dashCd > 0L) dashCd = max(0L, dashCd - dt) else if (dashMs <= 0L) {
                                 dashMs = 280L
-                                dashCd = 680L - stage * 110L
+                                dashCd = (680L - stage * 110L - (diff - 1) * 35L).coerceAtLeast(260L)
                             }
                         }
                         if (dashMs > 0L) {
                             dashMs = max(0L, dashMs - dt)
-                            y += 11f + stage * 2.5f
+                            y += (11f + stage * 2.5f) * (1f + (diff - 1) * 0.08f)
                         }
-                        if (stage >= 2) {
+                        val dodgeEnabled = m.role == MonsterRole.SKIRMISHER || m.role == MonsterRole.ELITE_MINI || diff >= 6
+                        if (dodgeEnabled && stage >= 2) {
                             if (dodgeCd > 0L) dodgeCd = max(0L, dodgeCd - dt) else {
-                                val step = 26f + stage * 6f
+                                val step = (26f + stage * 6f) * (1f + (diff - 1) * 0.06f)
                                 baseX = (baseX + if (playerX > m.pos.x) -step else step)
                                     .coerceIn(pathLeft + m.radius, pathRight - m.radius)
-                                dodgeCd = 620L - stage * 80L
+                                dodgeCd = (620L - stage * 80L - (diff - 1) * 30L).coerceAtLeast(220L)
                             }
                         }
                         val amp = 20f + stage * 6f
@@ -1376,19 +1454,23 @@ private fun GameScreen() {
                                     0 -> 6.8f
                                     1 -> 7.8f
                                     else -> 9.0f
-                                }
+                                } * (1f + (diff - 1) * 0.08f)
                                 val kind = m.rangedShotKind
                                 val speedShot = (if (kind == EnemyShotKind.SPEAR) baseSpeed * 1.22f else baseSpeed * 0.86f) * 2f
-                                // Ranged monsters fire straight downward lanes (non-tracking).
-                                val vx = 0f
-                                val vy = speedShot
                                 val radius = if (kind == EnemyShotKind.SPEAR) 9f else 16f
-                                enemyShots.add(EnemyShot(ms, Offset(vx, vy), radius, kind))
-                                shotCd = when (stage) {
+                                if ((m.role == MonsterRole.CASTER && diff >= 4) || (m.role == MonsterRole.ELITE_MINI && diff >= 9)) {
+                                    val offsets = if (diff >= 7) listOf(-12f, 0f, 12f) else listOf(-10f, 10f)
+                                    offsets.forEach { ox ->
+                                        enemyShots.add(EnemyShot(ms.copy(x = ms.x + ox), Offset(0f, speedShot * 0.9f), radius * 0.9f, kind))
+                                    }
+                                } else {
+                                    enemyShots.add(EnemyShot(ms, Offset(0f, speedShot), radius, kind))
+                                }
+                                shotCd = (when (stage) {
                                     0 -> 980L
                                     1 -> 760L
                                     else -> 620L
-                                }
+                                } - (diff - 1) * if (m.role == MonsterRole.CASTER) 55L else 35L).coerceAtLeast(220L)
                             }
                         }
                         monsters[i] = m.copy(
@@ -1797,16 +1879,24 @@ private fun GameScreen() {
                         shakeMs = 220L
                         flashMs = 220L
                         pendingStageIndex = stageIndex + 1
-                        bossRewardRemaining = 2
-                        if (weapon != null) {
-                            paused = true
-                            upgradeChoices = generateUpgradeChoices(weapon!!, rng)
-                        } else {
+                        if (pendingStageIndex >= 3) {
+                            val clearBonus = 50 + currentDifficulty * 20
+                            coins += clearBonus
+                            if (currentDifficulty >= unlockedDifficulty && unlockedDifficulty < 9) {
+                                unlockedDifficulty += 1
+                                floatingTexts.add(FloatingText("난이도 ${unlockedDifficulty} 해금!", Offset(playerX, playerY - 80f), ui.accent, 1600L))
+                            }
+                            stageIndex = 3
                             paused = false
-                            if (pendingStageIndex >= 3) {
-                                loopCount = 1
-                                advanceStage(0)
+                            upgradeChoices = emptyList()
+                            running = false
+                        } else {
+                            bossRewardRemaining = 2
+                            if (weapon != null) {
+                                paused = true
+                                upgradeChoices = generateUpgradeChoices(weapon!!, rng)
                             } else {
+                                paused = false
                                 advanceStage(pendingStageIndex)
                             }
                         }
@@ -1846,12 +1936,12 @@ private fun GameScreen() {
                                     }
                                 }
                                 DropKind.COIN -> {
-                                    val roll = rng.nextInt(100)
-                                    val amount = when (stageIndex) {
+                                    val base = when (stageIndex) {
                                         0 -> 1 + rng.nextInt(5) // 1~5
                                         1 -> 1 + rng.nextInt(20) // 1~20
                                         else -> 1 + rng.nextInt(50) // 1~50
                                     }
+                                    val amount = base + ((currentDifficulty - 1) / 2)
                                     coins += amount
                                     floatingTexts.add(FloatingText("+$amount 코인", ds.copy(y = ds.y - 18f), Color(0xFFFFD36A), 700L))
                                     addParticles(ds, Color(0xFFFFD36A))
@@ -1910,7 +2000,25 @@ private fun GameScreen() {
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (screenState == ScreenState.MENU) {
-                val context = LocalContext.current
+                val menuFx = rememberInfiniteTransition(label = "menu_fx")
+                val pulse by menuFx.animateFloat(
+                    initialValue = 0.35f,
+                    targetValue = 0.95f,
+                    animationSpec = infiniteRepeatable(animation = tween(1100), repeatMode = RepeatMode.Reverse),
+                    label = "menu_pulse"
+                )
+                val shimmer by menuFx.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(animation = tween(1800), repeatMode = RepeatMode.Restart),
+                    label = "menu_shimmer"
+                )
+                val hintBlink by menuFx.animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(animation = tween(520), repeatMode = RepeatMode.Reverse),
+                    label = "menu_hint_blink"
+                )
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val theme = stageTheme(0)
                     val dirtTop = theme.dirtTop
@@ -1925,42 +2033,42 @@ private fun GameScreen() {
                         )
                     )
                 }
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable {
+                            uiClickFxMs = 180L
+                            toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 60)
+                            screenState = ScreenState.SHOP
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
                                 .width(360.dp)
-                                .height(178.dp)
-                                .background(
-                                    brush = Brush.verticalGradient(
-                                        listOf(Color(0xD9291F17), Color(0xA61A130E))
-                                    ),
-                                    shape = RoundedCornerShape(26.dp)
-                                )
-                                .border(2.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(26.dp)),
+                                .height(178.dp),
                             contentAlignment = Alignment.Center
                         ) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val cx = size.width * 0.5f
+                                val cy = size.height * 0.5f
+                                drawCircle(ui.accent.copy(alpha = 0.06f + pulse * 0.10f), size.minDimension * 0.40f, Offset(cx, cy))
+                                drawCircle(ui.accent.copy(alpha = 0.12f + pulse * 0.12f), size.minDimension * 0.56f, Offset(cx, cy), style = Stroke(width = 3f))
+                                val ang = shimmer * 6.28318f
+                                val o1 = Offset(cx + kotlin.math.cos(ang) * size.width * 0.32f, cy + kotlin.math.sin(ang) * size.height * 0.28f)
+                                val o2 = Offset(cx + kotlin.math.cos(ang + 3.14159f) * size.width * 0.32f, cy + kotlin.math.sin(ang + 3.14159f) * size.height * 0.28f)
+                                drawCircle(ui.accent.copy(alpha = 0.38f), 4.5f + pulse * 3f, o1)
+                                drawCircle(ui.accent.copy(alpha = 0.30f), 3.5f + pulse * 2f, o2)
+                            }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("GATE RUNNER", color = ui.accent, fontSize = 44.sp)
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text("ARCADE HUNTER", color = ui.text.copy(alpha = 0.92f), fontSize = 18.sp)
+                                Spacer(modifier = Modifier.height(uiGapSm))
+                                Text("ARCADE HUNTER", color = ui.text.copy(alpha = 0.92f), fontSize = fsSubtitle)
                             }
                         }
-                        Spacer(modifier = Modifier.height(26.dp))
-                        val menuAction: @Composable (String, Color, () -> Unit) -> Unit = { label, color, onClick ->
-                            Text(
-                                label,
-                                color = color,
-                                fontSize = 34.sp,
-                                modifier = Modifier
-                                    .padding(vertical = 6.dp)
-                                    .clickable { onClick() }
-                            )
-                        }
-                        menuAction("시작", ui.accent) {
-                            screenState = ScreenState.SHOP
-                        }
-                        menuAction("종료", ui.text.copy(alpha = 0.88f)) { (context as? android.app.Activity)?.finish() }
+                        Spacer(modifier = Modifier.height(uiGapLg))
+                        Text("화면 터치해서 시작", color = ui.text.copy(alpha = 0.2f + hintBlink * 0.8f), fontSize = 24.sp)
                     }
                 }
             }
@@ -1999,15 +2107,23 @@ private fun GameScreen() {
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("상점", color = ui.accent, fontSize = 36.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("보유 코인  $coins", color = ui.text, fontSize = 18.sp)
+                                Text("상점", color = ui.accent, fontSize = fsTitle)
+                                Spacer(modifier = Modifier.height(uiGapSm))
+                                Text("보유 코인  $coins", color = ui.text, fontSize = fsSubtitle)
+//                                Spacer(modifier = Modifier.height(6.dp))
+//                                Text("해금 난이도: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = 14.sp)
                             }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        if (shopMsg.isNotEmpty()) {
-                            Text(shopMsg, color = accent, fontSize = 17.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(uiGapMd))
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (shopMsg.isNotEmpty()) {
+                                Text(shopMsg, color = accent, fontSize = fsBody)
+                            }
                         }
 
                         val shopCard: @Composable (String, Int, Int, Int, @Composable () -> Unit, () -> Unit) -> Unit =
@@ -2027,7 +2143,11 @@ private fun GameScreen() {
                                             shape = shape
                                         )
                                         .border(1.5.dp, frame.copy(alpha = 0.75f), shape)
-                                        .clickable { if (!isMax) onBuy() },
+                                        .clickable {
+                                            uiClickFxMs = 140L
+                                            toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 45)
+                                            if (!isMax) onBuy()
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     androidx.compose.foundation.layout.Row(
@@ -2191,19 +2311,137 @@ private fun GameScreen() {
                             Text(
                                 label,
                                 color = color,
-                                fontSize = 30.sp,
+                                fontSize = fsAction,
                                 modifier = Modifier
-                                    .padding(vertical = 4.dp)
-                                    .clickable { onClick() }
+                                    .padding(vertical = uiGapSm)
+                                    .clickable {
+                                        uiClickFxMs = 160L
+                                        toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 55)
+                                        onClick()
+                                    }
                             )
                         }
-                        shopAction("게임 시작", ui.accent) {
-                            resetGame()
-                            screenState = ScreenState.GAME
+                        shopAction("난이도 선택", ui.accent) {
+                            screenState = ScreenState.DIFFICULTY
                         }
                         shopAction("뒤로", ui.text.copy(alpha = 0.9f)) { screenState = ScreenState.MENU }
                     }
                 }
+            }
+            if (screenState == ScreenState.DIFFICULTY) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val theme = stageTheme(0)
+                    drawRect(brush = Brush.verticalGradient(listOf(theme.dirtTop, theme.dirtMid, theme.dirtBot)))
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(theme.glow.copy(alpha = 0.22f), Color.Transparent),
+                            center = Offset(size.width * 0.5f, size.height * 0.23f),
+                            radius = size.width * 0.9f
+                        )
+                    )
+                }
+                val diff = selectedDifficulty.coerceIn(1, unlockedDifficulty)
+                val speedScale = 1f + (diff - 1) * 0.08f
+                val reward = 50 + diff * 20
+                val waveInfo = when {
+                    diff >= 7 -> "웨이브 밀도 매우 높음"
+                    diff >= 4 -> "웨이브 밀도 높음"
+                    else -> "웨이브 밀도 보통"
+                }
+                val patternInfo = when {
+                    diff >= 9 -> "엘리트 원거리/보스 혼합패턴"
+                    diff >= 7 -> "보스 추가 패턴 활성"
+                    diff >= 4 -> "캐스터 다중 투사체"
+                    else -> "기본 패턴"
+                }
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .width(352.dp)
+                                .background(
+                                    brush = Brush.verticalGradient(listOf(Color(0xD9291F17), Color(0xA61A130E))),
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .border(2.dp, ui.accent.copy(alpha = 0.8f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                Text("난이도 선택", color = ui.accent, fontSize = fsTitle)
+                                Spacer(modifier = Modifier.height(uiGapMd))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "◀",
+                                    color = if (selectedDifficulty > 1) ui.text else ui.muted,
+                                    fontSize = fsAction,
+                                    modifier = Modifier.clickable {
+                                            if (selectedDifficulty > 1) {
+                                                uiClickFxMs = 130L
+                                                toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 40)
+                                                selectedDifficulty -= 1
+                                            }
+                                        }
+                                    )
+                                    Text("난이도 $selectedDifficulty", color = ui.text, fontSize = fsAction)
+                                    Text(
+                                        "▶",
+                                        color = if (selectedDifficulty < unlockedDifficulty) ui.text else ui.muted,
+                                        fontSize = fsAction,
+                                        modifier = Modifier.clickable {
+                                            if (selectedDifficulty < unlockedDifficulty) {
+                                                uiClickFxMs = 130L
+                                                toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 40)
+                                                selectedDifficulty += 1
+                                            }
+                                        }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(uiGapMd))
+                                Text("해금: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = fsBody)
+                                Spacer(modifier = Modifier.height(uiGapSm))
+                                Text("적 체력/속도 x${String.format("%.2f", speedScale)}", color = ui.text, fontSize = fsBody)
+                                Text(waveInfo, color = ui.text, fontSize = fsBody)
+                                Text(patternInfo, color = ui.text, fontSize = fsBody)
+                                Text("클리어 보상 +$reward 코인", color = ui.accent, fontSize = fsSubtitle)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(uiGapMd))
+                        Text(
+                            "시작",
+                            color = ui.accent,
+                            fontSize = fsAction,
+                            modifier = Modifier.clickable {
+                                uiClickFxMs = 180L
+                                toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 70)
+                                currentDifficulty = selectedDifficulty.coerceIn(1, unlockedDifficulty)
+                                resetGame()
+                                screenState = ScreenState.GAME
+                            }
+                        )
+                        Text(
+                            "뒤로",
+                            color = ui.text,
+                            fontSize = fsAction,
+                            modifier = Modifier.clickable {
+                                uiClickFxMs = 160L
+                                toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 55)
+                                screenState = ScreenState.SHOP
+                            }
+                        )
+                    }
+                }
+            }
+            if (uiClickFxMs > 0L) {
+                val a = (uiClickFxMs / 180f).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.12f * a))
+                )
             }
             val pauseTopDp = 72.dp
             val pauseBlockPx = with(LocalDensity.current) { 72.dp.toPx() }
@@ -3113,6 +3351,31 @@ private fun GameScreen() {
                 // Player (chibi archer, concept-aligned)
                 val c = Offset(playerX, playerY)
                 val r = playerRadius
+                val playerSprite = rogueSprites.firstOrNull { it.label == playerSpriteLabel }?.bitmap
+                if (playerSprite != null) {
+                    val sw = playerSprite.width.toFloat()
+                    val sh = playerSprite.height.toFloat()
+                    val targetMax = (r * 2.35f).coerceAtLeast(24f)
+                    val scale = targetMax / max(1f, max(sw, sh))
+                    val dw = sw * scale
+                    val dh = sh * scale
+                    val left = kotlin.math.round(c.x - dw * 0.5f)
+                    val top = kotlin.math.round(c.y - dh * 0.68f)
+                    drawCircle(Color(0xFFFFC35A).copy(alpha = 0.14f), r * 1.8f, c)
+                    drawOval(
+                        color = Color(0xFF2A1B12).copy(alpha = 0.32f),
+                        topLeft = Offset(c.x - r * 0.9f, c.y + r * 0.8f),
+                        size = androidx.compose.ui.geometry.Size(r * 1.8f, r * 0.45f)
+                    )
+                    drawIntoCanvas { cc ->
+                        cc.nativeCanvas.drawBitmap(
+                            playerSprite,
+                            null,
+                            android.graphics.RectF(left, top, left + dw, top + dh),
+                            spritePaint
+                        )
+                    }
+                } else {
                 // ground glow
                 drawCircle(Color(0xFFFFC35A).copy(alpha = 0.18f), r * 1.8f, c)
                 // shadow
@@ -3162,6 +3425,7 @@ private fun GameScreen() {
                 drawRect(Color(0xFF3A2A1A), Offset(c.x + r * 0.45f, c.y - r * 1.1f), androidx.compose.ui.geometry.Size(r * 0.35f, r * 0.9f))
                 drawLine(Color(0xFFE6D0A5), Offset(c.x + r * 0.62f, c.y - r * 1.15f), Offset(c.x + r * 0.62f, c.y - r * 1.45f), 3f)
                 drawLine(Color(0xFFE6D0A5), Offset(c.x + r * 0.52f, c.y - r * 1.12f), Offset(c.x + r * 0.52f, c.y - r * 1.4f), 3f)
+                }
 
                 // Floating texts
                 floatingTexts.forEach { ft ->
@@ -3271,7 +3535,7 @@ private fun GameScreen() {
                         .padding(top = 96.dp),
                     contentAlignment = Alignment.TopCenter
                 ) {
-                    Text("STAGE ${min(stageIndex + 1, 3)} · $stageThemeName", color = ui.accent, fontSize = 18.sp)
+                    Text("STAGE ${min(stageIndex + 1, 3)} · $stageThemeName · 난이도 $currentDifficulty", color = ui.accent, fontSize = 18.sp)
                 }
 
                 Box(
@@ -3367,8 +3631,8 @@ private fun GameScreen() {
                                                 upgradeChoices = emptyList()
                                                 paused = false
                                                 if (pendingStageIndex >= 3) {
-                                                    loopCount = 1
-                                                    advanceStage(0)
+                                                    stageIndex = 3
+                                                    running = false
                                                 } else {
                                                     advanceStage(pendingStageIndex)
                                                 }
@@ -3441,7 +3705,7 @@ private fun GameScreen() {
                             .border(1.5.dp, ui.accent.copy(alpha = 0.75f * alpha), RoundedCornerShape(16.dp))
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text(nextName, color = ui.accent.copy(alpha = alpha), fontSize = 34.sp)
+                        Text(nextName, color = ui.accent.copy(alpha = alpha), fontSize = fsTitle)
                     }
                 }
             }
@@ -3493,13 +3757,13 @@ private fun GameScreen() {
                                 .border(1.5.dp, ui.accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
-                            Text("일시정지", color = ui.accent, fontSize = 34.sp)
+                            Text("일시정지", color = ui.accent, fontSize = fsTitle)
                         }
                         Spacer(modifier = Modifier.height(18.dp))
                         Text(
                             "재개",
                             color = ui.text,
-                            fontSize = 30.sp,
+                            fontSize = fsAction,
                             modifier = Modifier
                                 .padding(vertical = 8.dp)
                                 .clickable { manualPaused = false }
@@ -3507,7 +3771,7 @@ private fun GameScreen() {
                         Text(
                             "재시작",
                             color = ui.text,
-                            fontSize = 30.sp,
+                            fontSize = fsAction,
                             modifier = Modifier
                                 .padding(vertical = 8.dp)
                                 .clickable {
@@ -3518,7 +3782,7 @@ private fun GameScreen() {
                         Text(
                             "메인 메뉴",
                             color = ui.text,
-                            fontSize = 30.sp,
+                            fontSize = fsAction,
                             modifier = Modifier
                                 .padding(vertical = 8.dp)
                                 .clickable {
@@ -3551,16 +3815,20 @@ private fun GameScreen() {
                                 .border(1.5.dp, accent.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
-                            Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = 36.sp)
+                            Text(if (stageIndex >= 3) "클리어" else "게임 오버", color = accent, fontSize = fsTitle)
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("스테이지 ${min(stageIndex + 1, 3)}", color = ui.text, fontSize = 18.sp)
+                        Text("스테이지 ${min(stageIndex + 1, 3)} · 난이도 $currentDifficulty", color = ui.text, fontSize = 18.sp)
+                        if (stageIndex >= 3) {
+                            Text("추가 보상 +${50 + currentDifficulty * 20} 코인", color = ui.accent, fontSize = 16.sp)
+                            Text("해금 난이도: 1 ~ $unlockedDifficulty", color = ui.muted, fontSize = 14.sp)
+                        }
                         Spacer(modifier = Modifier.height(18.dp))
                         val actionTextButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
                             Text(
                                 label,
                                 color = ui.text,
-                                fontSize = 30.sp,
+                                fontSize = fsAction,
                                 modifier = Modifier
                                     .padding(vertical = 9.dp)
                                     .clickable { onClick() }
@@ -4296,7 +4564,15 @@ private fun generateBackground(
 }
 
 private fun extractMonsterSprites(context: Context): List<MonsterSpriteAsset> {
-    val sheet = BitmapFactory.decodeResource(context.resources, R.drawable.monsters) ?: return emptyList()
+    return extractSpriteSheet(context, R.drawable.monsters)
+}
+
+private fun extractRogueSprites(context: Context): List<MonsterSpriteAsset> {
+    return extractSpriteSheet(context, R.drawable.rogues)
+}
+
+private fun extractSpriteSheet(context: Context, drawableRes: Int): List<MonsterSpriteAsset> {
+    val sheet = BitmapFactory.decodeResource(context.resources, drawableRes) ?: return emptyList()
     val w = sheet.width
     val h = sheet.height
     if (w <= 0 || h <= 0) return emptyList()
