@@ -243,6 +243,13 @@ private data class HitSpark(
     var lifeMs: Long
 )
 
+private data class HitscanTrace(
+    val x: Float,
+    val startY: Float,
+    val endY: Float,
+    var lifeMs: Long
+)
+
 private data class Particle(
     val pos: Offset,
     val vel: Offset,
@@ -423,6 +430,7 @@ private fun GameScreen() {
         val deathBursts = remember { mutableStateListOf<DeathBurst>() }
         val muzzleFlashes = remember { mutableStateListOf<MuzzleFlash>() }
         val hitSparks = remember { mutableStateListOf<HitSpark>() }
+        val hitscanTraces = remember { mutableStateListOf<HitscanTrace>() }
         val particles = remember { mutableStateListOf<Particle>() }
         val maxParticles = 120
         val drops = remember { mutableStateListOf<Drop>() }
@@ -609,11 +617,12 @@ private fun GameScreen() {
             val diff = currentDifficulty.coerceIn(1, 9)
             val stride = height * 1.2f
             val gateCount = gatesPerStage
+            val gateH = height * 0.08f
             val pathInnerMargin = pathWidth * 0.14f
             val xMin = pathLeft + pathInnerMargin
             val xMax = pathRight - pathInnerMargin
-            val minMonstersPerBlock = (1 + (diff - 1) / 5).coerceIn(1, 3)
-            val maxMonstersPerBlock = (2 + (diff - 1) / 3).coerceIn(2, 5)
+            val minMonstersPerBlock = (1 + (diff - 1) / 6).coerceIn(1, 2)
+            val maxMonstersPerBlock = (2 + (diff - 1) / 4).coerceIn(2, 3)
             val segmentStartMonsterIndex = monsters.size
             val minRangedPerSegment = when (stage) {
                 0 -> 2
@@ -626,13 +635,18 @@ private fun GameScreen() {
                 else -> 9
             } + (diff - 1)
             var rangedSpawned = 0
+            val monsterBudget = when (stage) {
+                0 -> 14
+                1 -> 18
+                else -> 22
+            } + (diff - 1) * 2
+            var spawnedInSegment = 0
 
             val gateYs = ArrayList<Float>(gateCount)
             repeat(gateCount) { i ->
                 val cx = (pathLeft + pathRight) / 2f
                 val y = -scrollY - height * 0.10f - i * stride
                 gateYs.add(y)
-                val gateH = height * 0.08f
                 val gap = 6f
                 val leftRect = Rect(pathLeft, y - gateH, cx - gap, y)
                 val rightRect = Rect(cx + gap, y - gateH, pathRight, y)
@@ -656,14 +670,21 @@ private fun GameScreen() {
 
             // Spawn monsters between gates with fixed interval fractions (prevents empty gaps).
             val blockFractions = when {
-                diff >= 7 -> floatArrayOf(0.26f, 0.50f, 0.74f, 0.88f)
-                diff >= 4 -> floatArrayOf(0.30f, 0.56f, 0.80f)
-                else -> floatArrayOf(0.34f, 0.70f)
+                diff >= 7 -> floatArrayOf(0.28f, 0.56f, 0.84f)
+                diff >= 4 -> floatArrayOf(0.34f, 0.74f)
+                else -> floatArrayOf(0.40f, 0.80f)
             }
-            for (i in gateYs.indices) {
+            for (i in 0 until gateYs.lastIndex) {
                 val gateY = gateYs[i]
+                val nextGateY = gateYs[i + 1]
+                val gateSafeMargin = height * 0.11f
+                val upperBound = nextGateY + gateH + gateSafeMargin
+                val lowerBound = gateY - gateH - gateSafeMargin
                 blockFractions.forEachIndexed { blockIdx, frac ->
-                    val count = if (rng.nextFloat() < 0.62f) minMonstersPerBlock else maxMonstersPerBlock
+                    if (spawnedInSegment >= monsterBudget) return@forEachIndexed
+                    val planned = if (rng.nextFloat() < 0.70f) minMonstersPerBlock else maxMonstersPerBlock
+                    val count = min(planned, monsterBudget - spawnedInSegment)
+                    if (count <= 0) return@forEachIndexed
                     var prevX = xMin + rng.nextFloat() * (xMax - xMin)
                     repeat(count) { m ->
                         var cx = when (stage) {
@@ -699,21 +720,52 @@ private fun GameScreen() {
                         prevX = cx
                         val fracJitter = (rng.nextFloat() * 2f - 1f) * 0.045f
                         val yJitter = (rng.nextFloat() * 2f - 1f) * (height * 0.035f)
-                        val y = gateY - stride * (frac + fracJitter) - m * (height * 0.075f) + yJitter
+                        val yRaw = gateY - stride * (frac + fracJitter) - m * (height * 0.075f) + yJitter
+                        val y = yRaw.coerceIn(upperBound, lowerBound)
                         // Slightly bigger enemy footprint for better readability on mobile.
                         val baseR = pathWidth * 0.115f
                         val rangedChance = (0.40f + stage * 0.12f).coerceAtMost(0.80f)
                         val forceRanged = rangedSpawned < maxRangedPerSegment && (rng.nextFloat() < rangedChance)
                         var role = if (forceRanged) pickRangedRoleForStage(stage, rng) else pickRoleForStage(stage, rng)
-                        if (diff >= 8 && rng.nextFloat() < 0.12f) role = MonsterRole.ELITE_MINI
-                        val isRanged = isRangedRole(role) || (role == MonsterRole.ELITE_MINI && diff >= 9)
-                        val spriteRaw = pickMonsterRawSpriteIndex(stage, role, rng)
+                        if (diff >= 6 && rng.nextFloat() < 0.12f) role = MonsterRole.ELITE_MINI
+                        val eliteRanged = (role == MonsterRole.ELITE_MINI && diff >= 9 && rng.nextBoolean())
+                        val isRanged = isRangedRole(role) || eliteRanged
+                        val spriteRaw = if (role == MonsterRole.ELITE_MINI) {
+                            val eliteLabel = MonsterBalance.eliteMiniLabelForStage(stage, eliteRanged)
+                            monsterSpriteIndexByLabel(eliteLabel).takeIf { it >= 0 }
+                                ?: pickMonsterRawSpriteIndex(stage, role, rng)
+                        } else {
+                            pickMonsterRawSpriteIndex(stage, role, rng)
+                        }
                         val r = radiusFromRawSprite(spriteRaw, baseR)
                         val hpValue = hpForRole(role, stage, hpMult)
+                        var spawnPos = Offset(cx, y)
+                        var placed = false
+                        repeat(10) { attempt ->
+                            if (attempt > 0) {
+                                val rx = xMin + rng.nextFloat() * (xMax - xMin)
+                                val ry = y + (rng.nextFloat() * 2f - 1f) * (height * 0.10f)
+                                spawnPos = Offset(rx, ry)
+                            }
+                            val overlapsMonster = monsters.any { om ->
+                                hypot(om.pos.x - spawnPos.x, om.pos.y - spawnPos.y) < (om.radius + r + 6f)
+                            }
+                            val overlapsGate = gatePairs.any { gp ->
+                                (!gp.left.used && circleRectHit(spawnPos, r + 6f, gp.left.rect)) ||
+                                    (!gp.right.used && circleRectHit(spawnPos, r + 6f, gp.right.rect))
+                            }
+                            val overlapsBoss = boss?.let { circleRectHit(spawnPos, r + 8f, it.rect) } == true
+                            if (!overlapsMonster && !overlapsGate && !overlapsBoss) {
+                                placed = true
+                                return@repeat
+                            }
+                        }
+                        if (!placed) return@repeat
+
                         monsters.add(
                             Monster(
                                 id = nextMonsterId++,
-                                pos = Offset(cx, y),
+                                pos = spawnPos,
                                 radius = r,
                                 spriteRawIndex = spriteRaw,
                                 role = role,
@@ -722,17 +774,23 @@ private fun GameScreen() {
                                 shotCooldownMs = when (role) {
                                     MonsterRole.CASTER -> (700L + rng.nextInt(480) - stage * 80L).coerceAtLeast(320L)
                                     MonsterRole.THROWER_AXE -> (900L + rng.nextInt(640) - stage * 100L).coerceAtLeast(380L)
+                                    MonsterRole.THROWER_ARROW -> (760L + rng.nextInt(520) - stage * 100L).coerceAtLeast(320L)
                                     MonsterRole.THROWER_SPEAR -> (820L + rng.nextInt(580) - stage * 100L).coerceAtLeast(360L)
                                     else -> (900L + rng.nextInt(800) - stage * 120L).coerceAtLeast(420L)
                                 },
-                                rangedShotKind = if (role == MonsterRole.ELITE_MINI) EnemyShotKind.AXE else shotKindForRole(role),
-                                baseX = cx,
+                                rangedShotKind = when {
+                                    role == MonsterRole.ELITE_MINI && diff >= 9 -> EnemyShotKind.MAGIC_BALL
+                                    role == MonsterRole.ELITE_MINI -> EnemyShotKind.AXE
+                                    else -> shotKindForRole(role)
+                                },
+                                baseX = spawnPos.x,
                                 zigzagPhase = rng.nextFloat() * 6.28f,
                                 dashMs = 0L,
                                 dashCooldownMs = (520L + rng.nextInt(360)).toLong(),
                                 dodgeCooldownMs = (460L + rng.nextInt(320)).toLong()
                             )
                         )
+                        spawnedInSegment += 1
                         if (monsters.last().ranged) rangedSpawned += 1
                     }
                 }
@@ -810,6 +868,7 @@ private fun GameScreen() {
             deathBursts.clear()
             muzzleFlashes.clear()
             hitSparks.clear()
+            hitscanTraces.clear()
             particles.clear()
             drops.clear()
             pendingBursts.clear()
@@ -897,6 +956,7 @@ private fun GameScreen() {
             deathBursts.clear()
             muzzleFlashes.clear()
             hitSparks.clear()
+            hitscanTraces.clear()
             particles.clear()
             bgTrees.clear()
             bgBushes.clear()
@@ -1001,7 +1061,7 @@ private fun GameScreen() {
                 }
                 WeaponType.SPREAD3 -> {
                     val count = max(3, w.bulletCount)
-                    val maxHalfAngle = (22f + (count - 3) * 4.2f).coerceAtMost(68f)
+                    val maxHalfAngle = (30f + (count - 3) * 6.2f).coerceAtMost(112f)
                     val mid = (count - 1) / 2f
                     for (i in 0 until count) {
                         val t = if (mid == 0f) 0f else (i - mid) / mid
@@ -1032,6 +1092,78 @@ private fun GameScreen() {
                     val baseSpread = 14f + (count - 1) * 2f
                     val maxHalfWidth = 70f
                     val spread = if (count <= 1) 0f else min(baseSpread, (maxHalfWidth * 2f) / (count - 1))
+                    if (w.legendarySplash) {
+                        val perShotDamage = (w.damage * 1.1f).toInt().coerceAtLeast(1)
+                        val rayHalf = max(pathWidth * 0.12f, w.bulletRadius * 1.8f)
+                        for (i in 0 until count) {
+                            var shotX = x + (i - (count - 1) / 2f) * spread
+                            var traceEndY = 0f
+                            val maxHits = max(1, w.pierce + 1)
+                            val forwardTargets = monsters.mapIndexedNotNull { idx, m ->
+                                val ms = m.pos.shiftByScroll(scrollY)
+                                if (ms.y > playerY || m.hp <= 0) return@mapIndexedNotNull null
+                                idx to ms
+                            }
+                            var lockCandidates = forwardTargets
+                                .filter { (idx, ms) -> abs(ms.x - shotX) <= (monsters[idx].radius + rayHalf) }
+                                .sortedByDescending { it.second.y }
+
+                            // Auto-assist: if current column misses, lock to nearest forward target column.
+                            if (lockCandidates.isEmpty() && forwardTargets.isNotEmpty()) {
+                                val nearest = forwardTargets.minByOrNull { (_, ms) ->
+                                    abs(ms.x - shotX) + (playerY - ms.y) * 0.12f
+                                }
+                                if (nearest != null) {
+                                    shotX = nearest.second.x
+                                    lockCandidates = forwardTargets
+                                        .filter { (idx, ms) -> abs(ms.x - shotX) <= (monsters[idx].radius + rayHalf * 1.1f) }
+                                        .sortedByDescending { it.second.y }
+                                }
+                            }
+                            if (lockCandidates.isEmpty() && forwardTargets.isNotEmpty()) {
+                                lockCandidates = listOfNotNull(
+                                    forwardTargets.minByOrNull { (_, ms) ->
+                                        abs(ms.x - shotX) + (playerY - ms.y) * 0.2f
+                                    }
+                                )
+                            }
+
+                            var hitCount = 0
+                            lockCandidates.forEach { (idx, ms) ->
+                                if (hitCount >= maxHits) return@forEach
+                                val m = monsters[idx]
+                                if (m.hp <= 0) return@forEach
+                                val applied = min(m.hp, perShotDamage)
+                                monsters[idx] = m.copy(hp = m.hp - applied)
+                                floatingTexts.add(FloatingText("-$applied", ms.copy(y = ms.y - 14f), Color(0xFFFFD98A), 300L))
+                                hitSparks.add(HitSpark(ms, 120L))
+                                addParticles(ms, Color(0xFFFFC35A))
+                                laserAccumDamageByMonster[m.id] = (laserAccumDamageByMonster[m.id] ?: 0) + applied
+                                if (traceEndY <= 0f || ms.y > traceEndY) traceEndY = ms.y
+                                hitCount += 1
+                            }
+
+                            if (hitCount < maxHits) {
+                                boss?.let { b ->
+                                    val bs = b.rect.shiftByScroll(scrollY)
+                                    if (shotX >= bs.left - rayHalf && shotX <= bs.right + rayHalf && bs.bottom <= playerY) {
+                                        val applied = min(b.hp, perShotDamage)
+                                        boss = b.copy(hp = b.hp - applied)
+                                        val hitPos = Offset(shotX.coerceIn(bs.left, bs.right), bs.center.y)
+                                        floatingTexts.add(FloatingText("-$applied", hitPos.copy(y = hitPos.y - 16f), Color(0xFFFFD98A), 320L))
+                                        hitSparks.add(HitSpark(hitPos, 130L))
+                                        addParticles(hitPos, Color(0xFFFFC35A))
+                                        laserAccumBossDamage += applied
+                                        if (traceEndY <= 0f || hitPos.y > traceEndY) traceEndY = hitPos.y
+                                    }
+                                }
+                            }
+                            hitscanTraces.add(HitscanTrace(shotX, playerY, if (traceEndY > 0f) traceEndY else 0f, 90L))
+                        }
+                        muzzleFlashes.add(MuzzleFlash(Offset(x, playerY - playerRadius * 0.8f), 120L))
+                        addParticles(Offset(x, playerY - playerRadius), Color(0xFFFFE2A6))
+                        return
+                    }
                     for (i in 0 until count) {
                         val offset = (i - (count - 1) / 2f) * spread
                         bullets.add(Bullet(
@@ -1114,7 +1246,7 @@ private fun GameScreen() {
                         }
                     }
                     val diff = currentDifficulty.coerceIn(1, 9)
-                    val speed = (5.2f + stageIndex * 1.2f) * (1f + (diff - 1) * 0.08f)
+                    val speed = (5.2f + stageIndex * 1.2f) * (1f + (diff - 1) * 0.05f)
                     val bossScreen = boss?.rect?.shiftByScroll(scrollY)
                     val stopLine = playerY - playerRadius - 20f
                     // Always auto-scroll; boss is an obstacle wall.
@@ -1343,20 +1475,20 @@ private fun GameScreen() {
                         if (dashEnabled && stage >= 1) {
                             if (dashCd > 0L) dashCd = max(0L, dashCd - dt) else if (dashMs <= 0L) {
                                 dashMs = 280L
-                                dashCd = (680L - stage * 110L - (diff - 1) * 35L).coerceAtLeast(260L)
+                                dashCd = (680L - stage * 110L - (diff - 1) * 20L).coerceAtLeast(320L)
                             }
                         }
                         if (dashMs > 0L) {
                             dashMs = max(0L, dashMs - dt)
-                            y += (11f + stage * 2.5f) * (1f + (diff - 1) * 0.08f)
+                            y += (11f + stage * 2.5f) * (1f + (diff - 1) * 0.03f)
                         }
                         val dodgeEnabled = m.role == MonsterRole.SKIRMISHER || m.role == MonsterRole.ELITE_MINI || diff >= 6
                         if (dodgeEnabled && stage >= 2) {
                             if (dodgeCd > 0L) dodgeCd = max(0L, dodgeCd - dt) else {
-                                val step = (26f + stage * 6f) * (1f + (diff - 1) * 0.06f)
+                                val step = (26f + stage * 6f) * (1f + (diff - 1) * 0.03f)
                                 baseX = (baseX + if (playerX > m.pos.x) -step else step)
                                     .coerceIn(pathLeft + m.radius, pathRight - m.radius)
-                                dodgeCd = (620L - stage * 80L - (diff - 1) * 30L).coerceAtLeast(220L)
+                                dodgeCd = (620L - stage * 80L - (diff - 1) * 18L).coerceAtLeast(280L)
                             }
                         }
                         val amp = 20f + stage * 6f
@@ -1366,36 +1498,47 @@ private fun GameScreen() {
                         if (m.ranged) {
                             shotCd = max(0L, shotCd - dt)
                             val ms = newPos.shiftByScroll(scrollY)
-                            if (shotCd == 0L && ms.y < playerY - 20f && ms.y > 0f) {
+                            // Fairness: ranged enemies do not fire before player gets first weapon.
+                            if (weapon != null && shotCd == 0L && ms.y < playerY - 20f && ms.y > 0f) {
                                 val baseSpeed = when (stage) {
                                     0 -> 6.8f
                                     1 -> 7.8f
                                     else -> 9.0f
-                                } * (1f + (diff - 1) * 0.08f)
+                                } * (1f + (diff - 1) * 0.04f)
                                 val kind = m.rangedShotKind
                                 val speedShot = when (kind) {
+                                    EnemyShotKind.ARROW -> baseSpeed * 1.35f
                                     EnemyShotKind.SPEAR -> baseSpeed * 1.22f
                                     EnemyShotKind.AXE -> baseSpeed * 0.86f
                                     EnemyShotKind.MAGIC_BALL -> baseSpeed * 0.98f
                                 } * 2f
                                 val radius = when (kind) {
+                                    EnemyShotKind.ARROW -> 7f
                                     EnemyShotKind.SPEAR -> 9f
                                     EnemyShotKind.AXE -> 16f
-                                    EnemyShotKind.MAGIC_BALL -> 12.5f
+                                    EnemyShotKind.MAGIC_BALL -> if (m.role == MonsterRole.ELITE_MINI) 26f else 12.5f
                                 }
-                                if ((m.role == MonsterRole.CASTER && diff >= 4) || (m.role == MonsterRole.ELITE_MINI && diff >= 9)) {
+                                val aimedVel = if (kind == EnemyShotKind.MAGIC_BALL) {
+                                    val dx = playerX - ms.x
+                                    val dy = max(24f, playerY - ms.y)
+                                    val len = max(1f, hypot(dx, dy))
+                                    Offset((dx / len) * speedShot * 0.85f, (dy / len) * speedShot * 0.85f)
+                                } else {
+                                    Offset(0f, speedShot)
+                                }
+                                if (kind != EnemyShotKind.MAGIC_BALL && ((m.role == MonsterRole.CASTER && diff >= 4) || (m.role == MonsterRole.ELITE_MINI && diff >= 9))) {
                                     val offsets = if (diff >= 7) listOf(-12f, 0f, 12f) else listOf(-10f, 10f)
                                     offsets.forEach { ox ->
                                         enemyShots.add(EnemyShot(ms.copy(x = ms.x + ox), Offset(0f, speedShot * 0.9f), radius * 0.9f, kind))
                                     }
                                 } else {
-                                    enemyShots.add(EnemyShot(ms, Offset(0f, speedShot), radius, kind))
+                                    enemyShots.add(EnemyShot(ms, aimedVel, radius, kind))
                                 }
                                 shotCd = (when (stage) {
                                     0 -> 980L
                                     1 -> 760L
                                     else -> 620L
-                                } - (diff - 1) * if (m.role == MonsterRole.CASTER) 55L else 35L).coerceAtLeast(220L)
+                                } - (diff - 1) * if (m.role == MonsterRole.CASTER) 35L else 22L).coerceAtLeast(300L)
                             }
                         }
                         monsters[i] = m.copy(
@@ -1406,6 +1549,51 @@ private fun GameScreen() {
                             dashCooldownMs = dashCd,
                             dodgeCooldownMs = dodgeCd
                         )
+                    }
+
+                    // Hard no-overlap resolve for monsters vs monsters/gates/boss.
+                    if (monsters.size > 1) {
+                        repeat(2) {
+                            for (a in 0 until monsters.size) {
+                                for (b in a + 1 until monsters.size) {
+                                    val ma = monsters[a]
+                                    val mb = monsters[b]
+                                    val dx = mb.pos.x - ma.pos.x
+                                    val dy = mb.pos.y - ma.pos.y
+                                    val dist = max(0.001f, hypot(dx, dy))
+                                    val minDist = ma.radius + mb.radius + 6f
+                                    if (dist < minDist) {
+                                        val push = (minDist - dist) * 0.5f
+                                        val nx = dx / dist
+                                        val ny = dy / dist
+                                        val pa = Offset(
+                                            (ma.pos.x - nx * push).coerceIn(pathLeft + ma.radius, pathRight - ma.radius),
+                                            ma.pos.y - ny * push
+                                        )
+                                        val pb = Offset(
+                                            (mb.pos.x + nx * push).coerceIn(pathLeft + mb.radius, pathRight - mb.radius),
+                                            mb.pos.y + ny * push
+                                        )
+                                        monsters[a] = ma.copy(pos = pa, baseX = pa.x)
+                                        monsters[b] = mb.copy(pos = pb, baseX = pb.x)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Keep gate corridors clear: no monsters are allowed in/near active gate bands.
+                    val gateBandMargin = height * 0.10f
+                    monsters.removeAll { m ->
+                        val blockedByGate = gatePairs.any { gp ->
+                            val leftActive = !gp.left.used
+                            val rightActive = !gp.right.used
+                            (leftActive && m.pos.y in (gp.left.rect.top - gateBandMargin)..(gp.left.rect.bottom + gateBandMargin)) ||
+                                (rightActive && m.pos.y in (gp.right.rect.top - gateBandMargin)..(gp.right.rect.bottom + gateBandMargin))
+                        }
+                        val blockedByBoss = boss?.let { b ->
+                            circleRectHit(m.pos, m.radius + 3f, b.rect)
+                        } == true
+                        blockedByGate || blockedByBoss
                     }
 
                     // Laser duration (keep attached to player)
@@ -1454,6 +1642,11 @@ private fun GameScreen() {
                         hitSparks[i] = h.copy(lifeMs = h.lifeMs - dt)
                     }
                     hitSparks.removeAll { it.lifeMs <= 0L }
+                    for (i in hitscanTraces.indices) {
+                        val hs = hitscanTraces[i]
+                        hitscanTraces[i] = hs.copy(lifeMs = hs.lifeMs - dt)
+                    }
+                    hitscanTraces.removeAll { it.lifeMs <= 0L }
                     for (i in particles.indices) {
                         val p = particles[i]
                         particles[i] = p.copy(pos = p.pos + p.vel, lifeMs = p.lifeMs - dt)
@@ -2270,7 +2463,7 @@ private fun GameScreen() {
                     )
                 }
                 val diff = selectedDifficulty.coerceIn(1, unlockedDifficulty)
-                val speedScale = 1f + (diff - 1) * 0.08f
+                val speedScale = 1f + (diff - 1) * 0.05f
                 val reward = 50 + diff * 20
                 val waveInfo = when {
                     diff >= 7 -> "웨이브 밀도 매우 높음"
@@ -2280,7 +2473,7 @@ private fun GameScreen() {
                 val patternInfo = when {
                     diff >= 9 -> "엘리트 원거리/보스 혼합패턴"
                     diff >= 7 -> "보스 추가 패턴 활성"
-                    diff >= 4 -> "캐스터 다중 투사체"
+                    diff >= 4 -> "원거리 압박 패턴 강화"
                     else -> "기본 패턴"
                 }
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2789,6 +2982,21 @@ private fun GameScreen() {
                     // weapon
                     if (m.ranged) {
                         when (m.rangedShotKind) {
+                            EnemyShotKind.ARROW -> {
+                                val tip = Offset(ms.x + r * 0.72f, ms.y - r * 0.44f)
+                                val neck = Offset(ms.x + r * 0.34f, ms.y - r * 0.14f)
+                                val tail = Offset(ms.x - r * 0.20f, ms.y + r * 0.36f)
+                                drawLine(Color(0xFF7B4C24), tail, neck, max(2.2f, r * 0.20f))
+                                drawPath(
+                                    path = Path().apply {
+                                        moveTo(tip.x, tip.y)
+                                        lineTo((neck.x + r * 0.16f), (neck.y + r * 0.08f))
+                                        lineTo((neck.x - r * 0.08f), (neck.y - r * 0.20f))
+                                        close()
+                                    },
+                                    color = Color(0xFFD7D7D7)
+                                )
+                            }
                             EnemyShotKind.SPEAR -> {
                                 val grip = Offset(ms.x - r * 0.18f, ms.y + r * 0.38f)
                                 val tip = Offset(ms.x + r * 0.78f, ms.y - r * 0.52f)
@@ -2968,6 +3176,22 @@ private fun GameScreen() {
                         style = Stroke(width = max(2.5f, r * 0.24f))
                     )
                     when (s.kind) {
+                        EnemyShotKind.ARROW -> {
+                            val tip = s.pos + dir * (r * 2.0f)
+                            val neck = s.pos - dir * (r * 0.5f)
+                            val tail = s.pos - dir * (r * 1.8f)
+                            drawLine(Color(0xFF6B4B2A), tail, neck, max(1.8f, r * 0.42f))
+                            drawPath(
+                                path = Path().apply {
+                                    moveTo(tip.x, tip.y)
+                                    lineTo((neck + perp * (r * 0.75f)).x, (neck + perp * (r * 0.75f)).y)
+                                    lineTo((neck - perp * (r * 0.75f)).x, (neck - perp * (r * 0.75f)).y)
+                                    close()
+                                },
+                                color = Color(0xFFD7D7D7)
+                            )
+                            drawLine(warn, tail, neck, max(1.2f, r * 0.14f))
+                        }
                         EnemyShotKind.SPEAR -> {
                             val tip = s.pos + dir * (r * 1.7f)
                             val neck = s.pos - dir * (r * 0.55f)
@@ -3140,8 +3364,26 @@ private fun GameScreen() {
                     drawIntoCanvas { c ->
                     val fill = android.graphics.Paint(uiPaint).apply { color = ui.text.toArgb() }
                     val stroke = android.graphics.Paint(uiStrokePaint).apply { color = android.graphics.Color.BLACK }
-                    drawOutlinedText(c.nativeCanvas, stroke, fill, b.hp.toString(), bs.center.x, bs.top - 14f, 64f, android.graphics.Paint.Align.CENTER)
+                    val hpY = bs.top + max(30f, bs.height * 0.12f)
+                    drawOutlinedText(c.nativeCanvas, stroke, fill, b.hp.toString(), bs.center.x, hpY, 64f, android.graphics.Paint.Align.CENTER)
                 }
+                }
+
+                // Multi legendary hit-scan traces
+                hitscanTraces.forEach { hs ->
+                    val a = (hs.lifeMs / 90f).coerceIn(0f, 1f)
+                    drawLine(
+                        Color(0xFFFFC35A).copy(alpha = 0.42f * a),
+                        start = Offset(hs.x, hs.startY),
+                        end = Offset(hs.x, hs.endY),
+                        strokeWidth = 9f
+                    )
+                    drawLine(
+                        Color(0xFFFFE2A6).copy(alpha = 0.95f * a),
+                        start = Offset(hs.x, hs.startY),
+                        end = Offset(hs.x, hs.endY),
+                        strokeWidth = 3.8f
+                    )
                 }
 
                 // Bullets
@@ -3504,7 +3746,8 @@ private fun GameScreen() {
                 }
                 val specialLabel = when {
                     w == null -> "특수 없음"
-                    w.legendarySplash -> "명중폭발"
+                    w.legendarySplash && w.type == WeaponType.MULTI -> "히트스캔"
+                    w.legendarySplash && w.type == WeaponType.SPREAD3 -> "명중폭발"
                     w.legendarySuperHoming -> "슈퍼유도"
                     w.legendaryShardLaser -> "분기레이저"
                     else -> "특수 없음"
@@ -3589,7 +3832,8 @@ private fun GameScreen() {
                                 UpgradeType.PIERCE -> "관통 +${specialBonus}"
                                 UpgradeType.BURST -> "연속 +${specialBonus}"
                                 UpgradeType.LEGENDARY_SPECIAL -> when (weapon?.type) {
-                                    WeaponType.MULTI, WeaponType.SPREAD3 -> "명중 시 소형 폭발"
+                                    WeaponType.MULTI -> "탄환 대신 히트스캔 공격"
+                                    WeaponType.SPREAD3 -> "명중 시 소형 폭발"
                                     WeaponType.HOMING -> "유도 속도+ / 무한 유도"
                                     WeaponType.LASER -> "랜덤 6갈래 분기 레이저"
                                     null -> "무기 특수 강화"
@@ -4082,7 +4326,8 @@ private fun upgradeLabel(type: UpgradeType): String {
 
 private fun legendarySpecialLabel(weaponType: WeaponType): String {
     return when (weaponType) {
-        WeaponType.MULTI, WeaponType.SPREAD3 -> "명중 폭발"
+        WeaponType.MULTI -> "히트 스캔"
+        WeaponType.SPREAD3 -> "명중 폭발"
         WeaponType.HOMING -> "슈퍼 유도"
         WeaponType.LASER -> "분기 레이저"
     }

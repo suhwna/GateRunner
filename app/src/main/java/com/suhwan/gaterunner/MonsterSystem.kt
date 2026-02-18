@@ -6,10 +6,10 @@ import kotlin.math.max
 import kotlin.random.Random
 
 // 원거리 몬스터 투사체 타입(시각/판정용)
-enum class EnemyShotKind { SPEAR, AXE, MAGIC_BALL }
+enum class EnemyShotKind { ARROW, SPEAR, AXE, MAGIC_BALL }
 
 // 몬스터 역할군(근접/원거리/엘리트)
-enum class MonsterRole { RUSHER, SKIRMISHER, BRUISER, THROWER_SPEAR, THROWER_AXE, CASTER, ELITE_MINI }
+enum class MonsterRole { RUSHER, SKIRMISHER, BRUISER, THROWER_ARROW, THROWER_SPEAR, THROWER_AXE, CASTER, ELITE_MINI }
 
 // 런타임 몬스터 상태 데이터
 data class Monster(
@@ -51,18 +51,18 @@ object MonsterBalance {
         val roll = rng.nextFloat()
         return when (stage) {
             0 -> when {
-                roll < 0.70f -> MonsterRole.RUSHER
-                roll < 0.90f -> MonsterRole.SKIRMISHER
+                roll < 0.20f -> MonsterRole.RUSHER
+                roll < 0.40f -> MonsterRole.SKIRMISHER
                 else -> MonsterRole.BRUISER
             }
             1 -> when {
-                roll < 0.25f -> MonsterRole.RUSHER
-                roll < 0.65f -> MonsterRole.SKIRMISHER
+                roll < 0.20f -> MonsterRole.RUSHER
+                roll < 0.40f -> MonsterRole.SKIRMISHER
                 else -> MonsterRole.BRUISER
             }
             else -> when {
                 roll < 0.20f -> MonsterRole.RUSHER
-                roll < 0.55f -> MonsterRole.SKIRMISHER
+                roll < 0.40f -> MonsterRole.SKIRMISHER
                 else -> MonsterRole.BRUISER
             }
         }
@@ -72,9 +72,19 @@ object MonsterBalance {
     fun pickRangedRoleForStage(stage: Int, rng: Random): MonsterRole {
         val roll = rng.nextFloat()
         return when (stage) {
-            0 -> if (roll < 0.70f) MonsterRole.THROWER_SPEAR else MonsterRole.THROWER_AXE
-            1 -> if (roll < 0.55f) MonsterRole.THROWER_AXE else MonsterRole.CASTER
-            else -> if (roll < 0.40f) MonsterRole.THROWER_SPEAR else MonsterRole.CASTER
+            0 -> when {
+                roll < 0.40f -> MonsterRole.THROWER_AXE
+                roll < 0.80f -> MonsterRole.THROWER_ARROW
+                else -> MonsterRole.CASTER
+            }
+            1 -> when {
+                roll < 0.55f -> MonsterRole.THROWER_ARROW
+                else -> MonsterRole.CASTER
+            }
+            else -> when {
+                roll < 0.20f -> MonsterRole.THROWER_SPEAR
+                else -> MonsterRole.CASTER
+            }
         }
     }
 
@@ -84,6 +94,7 @@ object MonsterBalance {
             MonsterRole.RUSHER -> 34 + stage * 20
             MonsterRole.SKIRMISHER -> 30 + stage * 18
             MonsterRole.BRUISER -> 62 + stage * 32
+            MonsterRole.THROWER_ARROW -> ((40 + stage * 22) * 0.8f).toInt()
             MonsterRole.THROWER_SPEAR -> ((42 + stage * 24) * 0.85f).toInt()
             MonsterRole.THROWER_AXE -> ((46 + stage * 26) * 0.9f).toInt()
             MonsterRole.CASTER -> ((40 + stage * 22) * 0.8f).toInt()
@@ -97,21 +108,31 @@ object MonsterBalance {
         return when (role) {
             MonsterRole.CASTER -> EnemyShotKind.MAGIC_BALL
             MonsterRole.THROWER_AXE -> EnemyShotKind.AXE
-            else -> EnemyShotKind.SPEAR
+            MonsterRole.THROWER_ARROW -> EnemyShotKind.ARROW
+            MonsterRole.THROWER_SPEAR -> EnemyShotKind.SPEAR
+            else -> EnemyShotKind.MAGIC_BALL
         }
     }
 
     // 원거리 역할 여부 판정
     fun isRangedRole(role: MonsterRole): Boolean {
-        return role == MonsterRole.THROWER_SPEAR || role == MonsterRole.THROWER_AXE || role == MonsterRole.CASTER
+        return role == MonsterRole.THROWER_ARROW || role == MonsterRole.THROWER_SPEAR || role == MonsterRole.THROWER_AXE || role == MonsterRole.CASTER
     }
 
     // 스테이지별 보스 전용 라벨 고정값
     fun bossLabelForStage(stage: Int): String {
         return when (stage % 3) {
-            0 -> "B2"
-            1 -> "I3"
+            0 -> "B3"
+            1 -> "D2"
             else -> "L1"
+        }
+    }
+
+    fun eliteMiniLabelForStage(stage: Int, ranged: Boolean): String {
+        return when (stage % 3) {
+            0 -> if (ranged) "A7" else "B2"
+            1 -> if (ranged) "F4" else "E4"
+            else -> if (ranged) "M3" else "L2"
         }
     }
 
@@ -147,52 +168,63 @@ object MonsterBalance {
         }
 
         // 스테이지 1(숲) 라벨 풀
-        val s1Melee = listOf("A3", "A4", "A5")
-        val s1Spear = listOf("A2")
-        val s1Axe = listOf("B2")
-        val s1Caster = listOf("C2")
+        val s1Rusher = listOf("A4")
+        val s1Skirm = listOf("A3")
+        val s1Bruiser = listOf("B1")
+        val s1Arrow = listOf("A6")
+        val s1Spear = listOf("A6")
+        val s1Axe = listOf("A5")
+        val s1Caster = listOf("A2")
 
         // 스테이지 2(늪) 라벨 풀
-        val s2Rusher = listOf("C1", "C2", "C3")
-        val s2Skirm = listOf("C4", "C5", "D2")
-        val s2Bruiser = listOf("D3", "D4", "E1")
-        val s2Spear = listOf("C6", "D1")
-        val s2Axe = listOf("D5", "E2")
-        val s2Caster = listOf("D6", "E3")
+        val s2Rusher = listOf("E1")
+        val s2Skirm = listOf("E6")
+        val s2Bruiser = listOf("F3")
+        val s2Arrow = listOf("E2")
+        val s2Spear = listOf("E2")
+        val s2Axe = listOf("E2")
+        val s2Caster = listOf("E3")
 
         // 스테이지 3(화산) 라벨 풀
-        val s3Rusher = listOf("E2", "E3", "E4")
-        val s3Skirm = listOf("E5", "F1", "F2")
-        val s3Bruiser = listOf("F3", "F4", "G1")
-        val s3Spear = listOf("E7", "F5")
-        val s3Axe = listOf("F6", "G2")
-        val s3Caster = listOf("G3", "G4")
+        val s3Rusher = listOf("I1")
+        val s3Skirm = listOf("I4")
+        val s3Bruiser = listOf("I3")
+        val s3Arrow = listOf("J1")
+        val s3Spear = listOf("J1")
+        val s3Axe = listOf("J1")
+        val s3Caster = listOf("K2")
 
+        // 스프라이트 인덱스 선택 로직
         return when (stage % 3) {
             0 -> when (role) {
+                MonsterRole.RUSHER -> pick(byLabels(s1Rusher))
+                MonsterRole.SKIRMISHER -> pick(byLabels(s1Skirm))
+                MonsterRole.BRUISER -> pick(byLabels(s1Bruiser))
+                MonsterRole.THROWER_ARROW -> pick(byLabels(s1Arrow.ifEmpty { s1Spear }))
                 MonsterRole.THROWER_SPEAR -> pick(byLabels(s1Spear))
                 MonsterRole.THROWER_AXE -> pick(byLabels(s1Axe.ifEmpty { s1Spear }))
                 MonsterRole.CASTER -> pick(byLabels(s1Caster.ifEmpty { s1Spear }))
-                MonsterRole.RUSHER, MonsterRole.SKIRMISHER, MonsterRole.BRUISER -> pick(byLabels(s1Melee))
-                MonsterRole.ELITE_MINI -> pick(byLabels(listOf("F1", "F2", "F3")))
+                MonsterRole.ELITE_MINI -> pick(byLabels(listOf(eliteMiniLabelForStage(0, false), eliteMiniLabelForStage(0, true))))
             }
             1 -> when (role) {
                 MonsterRole.RUSHER -> pick(byLabels(s2Rusher))
                 MonsterRole.SKIRMISHER -> pick(byLabels(s2Skirm))
                 MonsterRole.BRUISER -> pick(byLabels(s2Bruiser))
+                MonsterRole.THROWER_ARROW -> pick(byLabels(s2Arrow.ifEmpty { s2Spear }))
                 MonsterRole.THROWER_SPEAR -> pick(byLabels(s2Spear))
                 MonsterRole.THROWER_AXE -> pick(byLabels(s2Axe))
                 MonsterRole.CASTER -> pick(byLabels(s2Caster))
-                MonsterRole.ELITE_MINI -> pick(byLabels(listOf("H1", "H2", "H3")))
+                MonsterRole.ELITE_MINI -> pick(byLabels(listOf(eliteMiniLabelForStage(1, false), eliteMiniLabelForStage(1, true))))
             }
             else -> when (role) {
                 MonsterRole.RUSHER -> pick(byLabels(s3Rusher))
                 MonsterRole.SKIRMISHER -> pick(byLabels(s3Skirm))
                 MonsterRole.BRUISER -> pick(byLabels(s3Bruiser))
+                MonsterRole.THROWER_ARROW -> pick(byLabels(s3Arrow.ifEmpty { s3Spear }))
                 MonsterRole.THROWER_SPEAR -> pick(byLabels(s3Spear))
                 MonsterRole.THROWER_AXE -> pick(byLabels(s3Axe))
                 MonsterRole.CASTER -> pick(byLabels(s3Caster))
-                MonsterRole.ELITE_MINI -> pick(byLabels(listOf("I1", "I2", "I3")))
+                MonsterRole.ELITE_MINI -> pick(byLabels(listOf(eliteMiniLabelForStage(2, false), eliteMiniLabelForStage(2, true))))
             }
         }
     }
